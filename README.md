@@ -11,9 +11,9 @@
 ## Legacy IDE Extensions End of Life
 
 > [!IMPORTANT]
-> The legacy Kilo Code VS Code extension and JetBrains plugin in this repository reach end of life on **July 31, 2026**.
+> The legacy Kilo Code VS Code extension and JetBrains plugin in this repository reached end of life on **July 31, 2026**.
 >
-> After that date, Kilo will not provide updates, bug fixes, security patches, compatibility fixes, marketplace releases, or maintenance for this legacy codebase. The repository remains available for historical reference and community forks, but it is no longer the source for actively supported Kilo IDE products.
+> Kilo will no longer provide updates, bug fixes, security patches, compatibility fixes, marketplace releases, or maintenance for this legacy codebase. The repository remains available for historical reference and community forks, but it is no longer the source for actively supported Kilo IDE products.
 >
 > Use these resources instead:
 >
