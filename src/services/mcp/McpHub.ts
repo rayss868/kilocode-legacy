@@ -2524,6 +2524,12 @@ export class McpHub {
 	 * @returns Promise<void>
 	 */
 	async handleMcpEnabledChange(enabled: boolean): Promise<void> {
+		// No-op if the enabled state didn't actually change — prevents unnecessary
+		// server restarts when settings are saved without touching MCP settings.
+		if (enabled === (await this.isMcpEnabled())) {
+			return
+		}
+
 		if (!enabled) {
 			// If MCP is being disabled, disconnect all servers with error handling
 			const existingConnections = [...this.connections]

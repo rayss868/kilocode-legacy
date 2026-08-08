@@ -1891,6 +1891,79 @@ describe("McpHub", () => {
 			expect(server!.client).toBeNull()
 			expect(server!.transport).toBeNull()
 		})
+
+		it("should not restart servers when handleMcpEnabledChange is called with the current state", async () => {
+			// Mock StdioClientTransport
+			const stdioModule = await import("@modelcontextprotocol/sdk/client/stdio.js")
+			const StdioClientTransport = stdioModule.StdioClientTransport as ReturnType<typeof vi.fn>
+
+			const mockTransport = {
+				start: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+				stderr: {
+					on: vi.fn(),
+				},
+				onerror: null,
+				onclose: null,
+			}
+
+			StdioClientTransport.mockImplementation(() => mockTransport)
+
+			// Mock Client
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+
+			const mockClient = {
+				connect: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+				getInstructions: vi.fn().mockReturnValue("test instructions"),
+				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				getServerCapabilities: vi.fn().mockResolvedValue({ tools: {} }), // kilocode_change
+			}
+
+			Client.mockImplementation(() => mockClient)
+
+			// Start with MCP enabled (the current state)
+			mockProvider.getState = vi.fn().mockResolvedValue({ mcpEnabled: true })
+
+			// Mock the config file read
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"no-restart-test-server": {
+							command: "node",
+							args: ["test.js"],
+						},
+					},
+				}),
+			)
+
+			// Create McpHub and let it initialize with MCP enabled
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await new Promise((resolve) => setTimeout(resolve, 100))
+
+			// Verify server is connected
+			const connectedServer = mcpHub.connections.find((conn) => conn.server.name === "no-restart-test-server")
+			expect(connectedServer).toBeDefined()
+			expect(connectedServer!.server.status).toBe("connected")
+
+			// Track the original connection object
+			const originalConnection = connectedServer
+
+			// Clear calls made during initialization
+			vi.clearAllMocks()
+
+			// Simulate saving settings while MCP is already enabled — this is what
+			// happens when the webview posts mcpEnabled on every settings save.
+			await mcpHub.handleMcpEnabledChange(true)
+
+			// The server must NOT have been restarted
+			const serverAfter = mcpHub.connections.find((conn) => conn.server.name === "no-restart-test-server")
+			expect(serverAfter).toBe(originalConnection)
+			expect(serverAfter!.server.status).toBe("connected")
+			expect(mockClient.close).not.toHaveBeenCalled()
+			expect(mockTransport.close).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("Windows command wrapping", () => {
