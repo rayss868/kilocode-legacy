@@ -647,6 +647,11 @@ export const webviewMessageHandler = async (
 
 		case "updateSettings":
 			if (message.updatedSettings) {
+				// kilocode_change start
+				provider.log(
+					`[updateSettings] begin saving ${Object.keys(message.updatedSettings).length} key(s): ${Object.keys(message.updatedSettings).join(", ")}`,
+				)
+				// kilocode_change end
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					let newValue = value
 
@@ -740,7 +745,11 @@ export const webviewMessageHandler = async (
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
+				// kilocode_change start
+				// postStateToWebview truncates clineMessages to chatRenderLimit, so saving
+				// settings doesn't serialize/transfer the entire conversation.
 				await provider.postStateToWebview()
+				// kilocode_change end
 			}
 
 			break

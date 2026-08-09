@@ -222,6 +222,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>((props, ref)
 		enableSubfolderRules,
 		remoteBrowserEnabled,
 		maxReadFileLine,
+		chatRenderLimit, // kilocode_change
 		showAutoApproveMenu, // kilocode_change
 		yoloMode, // kilocode_change
 		showTaskTimeline, // kilocode_change
@@ -584,6 +585,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>((props, ref)
 					showRooIgnoredFiles: showRooIgnoredFiles ?? true,
 					enableSubfolderRules: enableSubfolderRules ?? false,
 					maxReadFileLine: maxReadFileLine ?? 500 /*kilocode_change*/,
+					chatRenderLimit: chatRenderLimit ?? 250 /*kilocode_change*/,
 					maxImageFileSize: maxImageFileSize ?? 5,
 					maxTotalImageSize: maxTotalImageSize ?? 20,
 					maxConcurrentFileReads: cachedState.maxConcurrentFileReads ?? 5,
@@ -1215,6 +1217,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>((props, ref)
 								showRooIgnoredFiles={showRooIgnoredFiles}
 								enableSubfolderRules={enableSubfolderRules}
 								maxReadFileLine={maxReadFileLine}
+								chatRenderLimit={chatRenderLimit}
 								maxImageFileSize={maxImageFileSize}
 								maxTotalImageSize={maxTotalImageSize}
 								maxConcurrentFileReads={maxConcurrentFileReads}

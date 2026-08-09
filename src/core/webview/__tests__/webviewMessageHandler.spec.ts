@@ -1035,6 +1035,7 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledWith(true)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledWith()
 	})
 
 	it("delegates enable=false to McpHub and posts updated state", async () => {
@@ -1047,6 +1048,7 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledWith(false)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledWith()
 	})
 
 	it("handles missing McpHub instance gracefully and still posts state", async () => {
@@ -1059,6 +1061,7 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledWith()
 	})
 })
 

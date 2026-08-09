@@ -22,6 +22,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	showRooIgnoredFiles?: boolean
 	enableSubfolderRules?: boolean
 	maxReadFileLine?: number
+	chatRenderLimit?: number // kilocode_change
 	maxImageFileSize?: number
 	maxTotalImageSize?: number
 	maxConcurrentFileReads?: number
@@ -41,6 +42,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "showRooIgnoredFiles"
 		| "enableSubfolderRules"
 		| "maxReadFileLine"
+		| "chatRenderLimit" // kilocode_change
 		| "maxImageFileSize"
 		| "maxTotalImageSize"
 		| "maxConcurrentFileReads"
@@ -65,6 +67,7 @@ export const ContextManagementSettings = ({
 	enableSubfolderRules,
 	setCachedStateField,
 	maxReadFileLine,
+	chatRenderLimit, // kilocode_change
 	maxImageFileSize,
 	maxTotalImageSize,
 	maxConcurrentFileReads,
@@ -271,6 +274,36 @@ export const ContextManagementSettings = ({
 						{t("settings:contextManagement.maxReadFile.description")}
 					</div>
 				</SearchableSetting>
+				{/*kilocode_change start: chat render limit setting*/}
+				<SearchableSetting
+					settingId="context-chat-render-limit"
+					section="contextManagement"
+					label={t("settings:contextManagement.chatRenderLimit.label")}>
+					<div className="flex flex-col gap-2">
+						<span className="font-medium">{t("settings:contextManagement.chatRenderLimit.label")}</span>
+						<div className="flex items-center gap-4">
+							<Input
+								type="number"
+								pattern="[0-9]*"
+								className="w-24 bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border px-2 py-1 rounded text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none disabled:opacity-50"
+								value={chatRenderLimit ?? 250}
+								min={1}
+								onChange={(e) => {
+									const newValue = parseInt(e.target.value, 10)
+									if (!isNaN(newValue) && newValue >= 1) {
+										setCachedStateField("chatRenderLimit", newValue)
+									}
+								}}
+								onClick={(e) => e.currentTarget.select()}
+								data-testid="chat-render-limit-input"
+							/>
+						</div>
+					</div>
+					<div className="text-vscode-descriptionForeground text-sm mt-2">
+						{t("settings:contextManagement.chatRenderLimit.description")}
+					</div>
+				</SearchableSetting>
+				{/*kilocode_change end*/}
 				{/*kilocode_change start*/}
 				<div>
 					<VSCodeCheckbox

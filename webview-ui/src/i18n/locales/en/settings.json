@@ -840,6 +840,10 @@
 			"lines": "lines",
 			"always_full_read": "Always read entire file"
 		},
+		"chatRenderLimit": {
+			"label": "Chat render limit",
+			"description": "Maximum number of chat messages rendered in the chat view. When a conversation exceeds this, older messages are hidden behind a cutoff bar for performance. Default: 250."
+		},
 		"maxImageFileSize": {
 			"label": "Max image file size",
 			"mb": "MB",

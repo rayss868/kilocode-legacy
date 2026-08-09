@@ -80,6 +80,8 @@ import { SessionManager } from "../../shared/kilocode/cli-sessions/core/SessionM
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import { fileExistsAtPath } from "../../utils/fs"
+import { safeWriteJson } from "../../utils/safeWriteJson"
+import { getCacheDirectoryPath } from "../../utils/storage"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
@@ -172,6 +174,18 @@ export class ClineProvider
 	private deviceAuthHandler?: DeviceAuthHandler // kilocode_change - Device auth handler
 
 	private recentTasksCache?: string[]
+	// kilocode_change start: Cache the parsed task history so repeated getTaskHistory()
+	// calls (e.g. every postStateToWebview) don't re-read + re-deserialize the entire
+	// task list from SQLite, which caused OOM on large histories during settings saves.
+	private taskHistoryCache?: HistoryItem[]
+	// kilocode_change end
+	// kilocode_change start: Coalesce rapid postStateToWebview() calls (e.g. the burst of
+	// ~30 individual setting handlers fired by a single settings save) into a single post.
+	// Without this, each post serialized the full clineMessages array and an extra large
+	// conversation caused the extension host to OOM.
+	private lastStatePostTime = 0
+	private static readonly STATE_POST_MIN_INTERVAL_MS = 30
+	// kilocode_change end
 	private pendingOperations: Map<string, PendingEditOperation> = new Map()
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 
@@ -339,6 +353,25 @@ export class ClineProvider
 		// kilocode_change start - Initialize auto-purge scheduler
 		this.initializeAutoPurgeScheduler()
 		// kilocode_change end
+
+		// kilocode_change: Purge legacy oversized MCP marketplace catalog from global state.
+		// It was previously stored as a ~1.3MB blob in VS Code global state, causing the
+		// extension host to freeze/restart on settings save. It now lives in a file cache.
+		void this.purgeLegacyMcpMarketplaceGlobalState().catch((error) => {
+			this.log(`[purgeLegacyMcpMarketplaceGlobalState] error: ${error instanceof Error ? error.message : error}`)
+		})
+	}
+
+	private async purgeLegacyMcpMarketplaceGlobalState() {
+		try {
+			const current = this.getGlobalState("mcpMarketplaceCatalog")
+			if (current !== undefined) {
+				await this.contextProxy.deleteGlobalStateKey("mcpMarketplaceCatalog")
+				this.log("[purgeLegacyMcpMarketplaceGlobalState] removed mcpMarketplaceCatalog from global state")
+			}
+		} catch (error) {
+			this.log(`[purgeLegacyMcpMarketplaceGlobalState] skipped: ${error instanceof Error ? error.message : error}`)
+		}
 	}
 
 	// kilocode_change start
@@ -1193,6 +1226,18 @@ export class ClineProvider
 			}
 		})
 
+		// kilocode_change start
+		try {
+			const snapshot = message as { type?: string; state?: { clineMessages?: unknown[] } }
+			const msgCount = Array.isArray(snapshot.state?.clineMessages) ? snapshot.state.clineMessages.length : undefined
+			this.log(
+				`[postMessageToWebview] type=${message.type}${msgCount !== undefined ? ` clineMessages=${msgCount}` : ""}`,
+			)
+		} catch {
+			this.log(`[postMessageToWebview] type=${message.type}`)
+		}
+		// kilocode_change end
+
 		await this.view?.webview.postMessage(message)
 	}
 
@@ -2046,6 +2091,7 @@ export class ClineProvider
 		await this.updateGlobalState("taskHistory", updatedTaskHistory)
 		this.kiloCodeTaskHistoryVersion++
 		this.recentTasksCache = undefined
+		this.taskHistoryCache = undefined // kilocode_change
 		await this.postStateToWebview()
 	}
 
@@ -2062,6 +2108,18 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
+		// kilocode_change start: Coalesce the burst of postStateToWebview() calls fired by a
+		// single settings save (~30 individual setting handlers). The first call posts
+		// immediately; subsequent calls within the short window are skipped. This preserves
+		// immediate streaming updates while preventing the extension host from serializing
+		// the full clineMessages array dozens of times per save (OOM on large conversations).
+		const now = Date.now()
+		if (now - this.lastStatePostTime < ClineProvider.STATE_POST_MIN_INTERVAL_MS) {
+			return
+		}
+		this.lastStatePostTime = now
+		// kilocode_change end
+
 		const state = await this.getStateToPostToWebview()
 		this.postMessageToWebview({ type: "state", state })
 
@@ -2199,7 +2257,7 @@ export class ClineProvider
 		}
 	}
 
-	async getStateToPostToWebview(): Promise<ExtensionState> {
+	async getStateToPostToWebview(options?: { omitHeavyFields?: boolean }): Promise<ExtensionState> {
 		const {
 			apiConfiguration,
 			customInstructions,
@@ -2273,6 +2331,7 @@ export class ClineProvider
 			showTimestamps, // kilocode_change
 			hideCostBelowThreshold, // kilocode_change
 			maxReadFileLine,
+			chatRenderLimit, // kilocode_change
 			maxImageFileSize,
 			maxTotalImageSize,
 			terminalCompressProgressBar,
@@ -2371,7 +2430,7 @@ export class ClineProvider
 		this.kiloCodeTaskHistorySizeForTelemetryOnly = taskHistory.length
 		// kilocode_change end
 
-		return {
+		const state = {
 			version: this.context.extension?.packageJSON?.version ?? "",
 			apiConfiguration,
 			customInstructions,
@@ -2401,7 +2460,7 @@ export class ClineProvider
 			currentTaskItem: this.getCurrentTask()?.taskId
 				? (taskHistory || []).find((item: HistoryItem) => item.id === this.getCurrentTask()?.taskId)
 				: undefined,
-			clineMessages: this.getCurrentTask()?.clineMessages || [],
+			clineMessages: this.truncateMessagesForState(this.getCurrentTask()?.clineMessages || [], chatRenderLimit), // kilocode_change
 			currentTaskTodos: this.getCurrentTask()?.todoList || [],
 			currentTaskCumulativeCost: this.getCurrentTask()?.getCumulativeTotalCost(), // kilocode_change
 			messageQueue: this.getCurrentTask()?.messageQueueService?.messages,
@@ -2466,6 +2525,7 @@ export class ClineProvider
 			enableSubfolderRules: enableSubfolderRules ?? false,
 			renderContext: this.renderContext,
 			maxReadFileLine: maxReadFileLine ?? 500 /*kilocode_change*/,
+			chatRenderLimit: chatRenderLimit ?? 250 /*kilocode_change*/,
 			maxImageFileSize: maxImageFileSize ?? 5,
 			maxTotalImageSize: maxTotalImageSize ?? 20,
 			maxConcurrentFileReads: maxConcurrentFileReads ?? 5,
@@ -2574,6 +2634,18 @@ export class ClineProvider
 			})(),
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
+
+		// kilocode_change start
+		if (options?.omitHeavyFields) {
+			// Prune the (potentially huge) message history from the state posted to the webview
+			// so saving settings doesn't serialize/transfer the whole conversation. The webview's
+			// merge keeps its existing messages since this key is omitted (not sent empty).
+			delete (state as Partial<ExtensionState>).clineMessages
+			this.log("[postStateToWebview] pruned clineMessages from state (omitHeavyFields)")
+		}
+		// kilocode_change end
+
+		return state
 	}
 
 	/**
@@ -2788,6 +2860,7 @@ export class ClineProvider
 			hideCostBelowThreshold: stateValues.hideCostBelowThreshold ?? 0, // kilocode_change
 			enableSubfolderRules: stateValues.enableSubfolderRules ?? false,
 			maxReadFileLine: stateValues.maxReadFileLine ?? 500 /*kilocode_change*/,
+			chatRenderLimit: stateValues.chatRenderLimit ?? 250 /*kilocode_change*/,
 			maxImageFileSize: stateValues.maxImageFileSize ?? 5,
 			maxTotalImageSize: stateValues.maxTotalImageSize ?? 20,
 			maxConcurrentFileReads: stateValues.maxConcurrentFileReads ?? 5,
@@ -2898,6 +2971,7 @@ export class ClineProvider
 		await this.updateGlobalState("taskHistory", history)
 		this.kiloCodeTaskHistoryVersion++
 		this.recentTasksCache = undefined
+		this.taskHistoryCache = undefined // kilocode_change
 
 		return history
 	}
@@ -3696,6 +3770,55 @@ export class ClineProvider
 
 	// kilocode_change:
 	// MCP Marketplace
+	private async getMcpMarketplaceCachePath(): Promise<string> {
+		const cacheDir = await getCacheDirectoryPath(this.contextProxy.globalStorageUri.fsPath)
+		return path.join(cacheDir, "mcp_marketplace.json")
+	}
+
+	private async readMcpMarketplaceCache(): Promise<McpMarketplaceCatalog | undefined> {
+		try {
+			const cachePath = await this.getMcpMarketplaceCachePath()
+			const exists = await fileExistsAtPath(cachePath)
+			if (!exists) {
+				return undefined
+			}
+			return JSON.parse(await fs.readFile(cachePath, "utf8"))
+		} catch (error) {
+			this.log(`[readMcpMarketplaceCache] Failed to read cache: ${error instanceof Error ? error.message : error}`)
+			return undefined
+		}
+	}
+
+	private async writeMcpMarketplaceCache(catalog: McpMarketplaceCatalog) {
+		try {
+			const cachePath = await this.getMcpMarketplaceCachePath()
+			await safeWriteJson(cachePath, catalog)
+		} catch (error) {
+			this.log(`[writeMcpMarketplaceCache] Failed to write cache: ${error instanceof Error ? error.message : error}`)
+		}
+	}
+
+	// kilocode_change start
+	/**
+	 * Truncates the message history before it is serialized into the state posted to the
+	 * webview. Rendering only the last `limit` messages (plus the task message) keeps the
+	 * transferred payload small for very large conversations, which previously caused the
+	 * extension host to freeze/restart when state ballooned to tens of MB. Cost metrics stay
+	 * accurate because the webview reads currentTaskCumulativeCost from the backend instead of
+	 * recomputing from the (now truncated) message list.
+	 */
+	private truncateMessagesForState(messages: ClineMessage[], limit: number): ClineMessage[] {
+		const effectiveLimit = limit > 0 ? limit : 250
+		if (messages.length <= effectiveLimit) {
+			return messages
+		}
+		if (effectiveLimit === 1) {
+			return [messages[0]]
+		}
+		return [messages[0], ...messages.slice(-(effectiveLimit - 1))]
+	}
+	// kilocode_change end
+
 	private async fetchMcpMarketplaceFromApi(silent: boolean = false): Promise<McpMarketplaceCatalog | undefined> {
 		try {
 			const response = await axios.get("https://api.cline.bot/v1/mcp/marketplace", {
@@ -3717,7 +3840,10 @@ export class ClineProvider
 				})),
 			}
 
-			await this.updateGlobalState("mcpMarketplaceCatalog", catalog)
+			// kilocode_change: Cache the catalog to a file instead of global state.
+			// Storing this ~1.3MB blob in VS Code global state caused the extension host
+			// to freeze/restart on every settings save ("large extension state detected").
+			await this.writeMcpMarketplaceCache(catalog)
 			return catalog
 		} catch (error) {
 			console.error("Failed to fetch MCP marketplace:", error)
@@ -3749,10 +3875,8 @@ export class ClineProvider
 
 	async fetchMcpMarketplace(forceRefresh: boolean = false) {
 		try {
-			// Check if we have cached data
-			const cachedCatalog = (await this.getGlobalState("mcpMarketplaceCatalog")) as
-				| McpMarketplaceCatalog
-				| undefined
+			// Check if we have cached data (file cache, not global state)
+			const cachedCatalog = await this.readMcpMarketplaceCache()
 			if (!forceRefresh && cachedCatalog?.items) {
 				await this.postMessageToWebview({
 					type: "mcpMarketplaceCatalog",
@@ -3876,6 +4000,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		})
 		await this.updateGlobalState("taskHistory", updatedHistory)
 		this.kiloCodeTaskHistoryVersion++
+		this.taskHistoryCache = undefined // kilocode_change
 		await this.postStateToWebview()
 	}
 
@@ -3905,7 +4030,13 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	private kiloCodeTaskHistorySizeForTelemetryOnly = 0
 
 	public getTaskHistory(): HistoryItem[] {
-		return this.getGlobalState("taskHistory") || []
+		// kilocode_change start: cache to avoid re-reading/deserializing the full task
+		// history from SQLite on every state post (OOM risk on large histories).
+		if (!this.taskHistoryCache) {
+			this.taskHistoryCache = this.getGlobalState("taskHistory") || []
+		}
+		return this.taskHistoryCache
+		// kilocode_change end
 	}
 	// kilocode_change end
 

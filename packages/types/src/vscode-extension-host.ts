@@ -179,6 +179,7 @@ export interface ExtensionMessage {
 		| "ttsStart"
 		| "ttsStop"
 		| "maxReadFileLine"
+		| "chatRenderLimit"
 		| "fileSearchResults"
 		| "toggleApiConfigPin"
 		| "mcpMarketplaceCatalog" // kilocode_change
@@ -606,6 +607,7 @@ export type ExtensionState = Pick<
 	showRooIgnoredFiles: boolean // Whether to show .kilocodeignore'd files in listings
 	enableSubfolderRules: boolean // Whether to load rules from subdirectories
 	maxReadFileLine: number // Maximum number of lines to read from a file before truncating
+	chatRenderLimit: number // kilocode_change: Maximum number of chat messages rendered in the chat view
 	showAutoApproveMenu: boolean // kilocode_change: Whether to show the auto-approve menu in the chat view
 	maxImageFileSize: number // Maximum size of image files to process in MB
 	maxTotalImageSize: number // Maximum total size for all images in a single read operation in MB

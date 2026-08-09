@@ -224,6 +224,21 @@ export class ContextProxy {
 		return this.originalContext.globalState.update(key, value)
 	}
 
+	/**
+	 * Removes a key from VS Code global state. Passing `undefined` to
+	 * `globalState.update` deletes the stored value. Also clears the in-memory
+	 * cache so subsequent reads do not return the removed value. Not supported
+	 * for pass-through keys (e.g. taskHistory).
+	 */
+	public async deleteGlobalStateKey<K extends GlobalStateKey>(key: K): Promise<void> {
+		if (isPassThroughStateKey(key)) {
+			logger.debug(`[deleteGlobalStateKey] Skipping pass-through key ${key}`)
+			return
+		}
+		delete this.stateCache[key]
+		await this.originalContext.globalState.update(key, undefined)
+	}
+
 	private getAllGlobalState(): GlobalState {
 		return Object.fromEntries(GLOBAL_STATE_KEYS.map((key) => [key, this.getGlobalState(key)]))
 	}

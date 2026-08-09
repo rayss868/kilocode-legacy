@@ -183,6 +183,7 @@ export const globalSettingsSchema = z.object({
 	showRooIgnoredFiles: z.boolean().optional(),
 	enableSubfolderRules: z.boolean().optional(),
 	maxReadFileLine: z.number().optional(),
+	chatRenderLimit: z.number().optional(),
 	maxImageFileSize: z.number().optional(),
 	maxTotalImageSize: z.number().optional(),
 
@@ -428,6 +429,7 @@ export const EVALS_SETTINGS: RooCodeSettings = {
 	maxGitStatusFiles: 20,
 	showRooIgnoredFiles: true,
 	maxReadFileLine: 500 /*kilocode_change*/, // -1 to enable full file reading.
+	chatRenderLimit: 250,
 
 	includeDiagnosticMessages: true,
 	maxDiagnosticMessages: 50,

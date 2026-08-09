@@ -308,6 +308,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		enableSubfolderRules: false, // Default to disabled - must be enabled to load rules from subdirectories
 		renderContext: "sidebar",
 		maxReadFileLine: 500 /*kilocode_change*/, // Default max read file line limit
+		chatRenderLimit: 250 /*kilocode_change*/, // Default max chat messages rendered in the chat view
 		maxImageFileSize: 5, // Default max image file size in MB
 		maxTotalImageSize: 20, // Default max total image size in MB
 		pinnedApiConfigs: {}, // Empty object for pinned API configs

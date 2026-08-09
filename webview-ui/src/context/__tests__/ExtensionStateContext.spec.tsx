@@ -246,6 +246,7 @@ describe("mergeExtensionState", () => {
 			enableSubfolderRules: false,
 			renderContext: "sidebar",
 			maxReadFileLine: 500,
+			chatRenderLimit: 250,
 			showAutoApproveMenu: false,
 			cloudUserInfo: null,
 			organizationAllowList: { allowAll: true, providers: {} },

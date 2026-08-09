@@ -825,6 +825,10 @@
 			"lines": "baris",
 			"always_full_read": "Selalu baca seluruh file"
 		},
+		"chatRenderLimit": {
+			"label": "Batas render chat",
+			"description": "Jumlah maksimum pesan chat yang dirender di tampilan chat. Jika percakapan melebihi angka ini, pesan lama disembunyikan di balik bar pemotong demi performa. Default: 250."
+		},
 		"maxImageFileSize": {
 			"label": "Ukuran file gambar maksimum",
 			"mb": "MB",

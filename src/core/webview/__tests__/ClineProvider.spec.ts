@@ -609,6 +609,7 @@ describe("ClineProvider", () => {
 			enableSubfolderRules: false,
 			renderContext: "sidebar",
 			maxReadFileLine: 500,
+			chatRenderLimit: 250, // kilocode_change
 			showAutoApproveMenu: false, // kilocode_change
 			maxImageFileSize: 5,
 			maxTotalImageSize: 20,
@@ -638,6 +639,26 @@ describe("ClineProvider", () => {
 
 		expect(mockPostMessage).toHaveBeenCalledWith(message)
 	})
+
+	// kilocode_change start
+	test("postStateToWebview coalesces rapid successive calls", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Reset the coalescing timestamp so the first call is not throttled.
+		;(provider as any).lastStatePostTime = 0
+
+		const getStateSpy = vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({} as any)
+
+		// A single settings save fires ~30 handlers, each calling postStateToWebview in
+		// rapid succession. Only the first call should actually post; the rest are skipped.
+		for (let i = 0; i < 30; i++) {
+			await provider.postStateToWebview()
+		}
+
+		expect(mockPostMessage).toHaveBeenCalledTimes(1)
+		expect(getStateSpy).toHaveBeenCalledTimes(1)
+	})
+	// kilocode_change end
 
 	test("handles webviewDidLaunch message", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
@@ -4086,6 +4107,37 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(mockCline.overwriteClineMessages).toHaveBeenCalled()
 				expect(mockCline.submitUserMessage).toHaveBeenCalled()
 			})
+		})
+	})
+
+	describe("truncateMessagesForState", () => {
+		it("returns the full list when under the limit", () => {
+			const messages = [1, 2, 3, 4, 5].map((ts) => ({ ts, type: "say", say: "text", text: String(ts) })) as ClineMessage[]
+			const result = (provider as any).truncateMessagesForState(messages, 250)
+			expect(result).toEqual(messages)
+		})
+
+		it("keeps the task message plus the last (limit - 1) messages when over the limit", () => {
+			const messages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((ts) => ({
+				ts,
+				type: "say",
+				say: "text",
+				text: String(ts),
+			})) as ClineMessage[]
+			const result = (provider as any).truncateMessagesForState(messages, 4)
+			expect(result.map((m: ClineMessage) => m.ts)).toEqual([1, 8, 9, 10])
+		})
+
+		it("falls back to a default limit when limit is not positive", () => {
+			const messages = [1, 2, 3].map((ts) => ({ ts, type: "say", say: "text", text: String(ts) })) as ClineMessage[]
+			const result = (provider as any).truncateMessagesForState(messages, 0)
+			expect(result).toEqual(messages)
+		})
+
+		it("handles limit of 1 by keeping only the task message", () => {
+			const messages = [1, 2, 3].map((ts) => ({ ts, type: "say", say: "text", text: String(ts) })) as ClineMessage[]
+			const result = (provider as any).truncateMessagesForState(messages, 1)
+			expect(result.map((m: ClineMessage) => m.ts)).toEqual([1])
 		})
 	})
 })

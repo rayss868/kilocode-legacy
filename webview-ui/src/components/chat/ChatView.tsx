@@ -53,6 +53,7 @@ import { IdeaSuggestionsBox } from "../kilocode/chat/IdeaSuggestionsBox" // kilo
 import { KilocodeNotifications } from "../kilocode/KilocodeNotifications" // kilocode_change
 import { QueuedMessages } from "./QueuedMessages"
 import { ReviewScopeSelector, type ReviewScopeInfo } from "./ReviewScopeSelector" // kilocode_change: Review mode
+import { truncateMessagesForDisplay } from "../../utils/truncateMessagesForDisplay" // kilocode_change
 import { buildDocLink } from "@/utils/docLinks"
 // import DismissibleUpsell from "../common/DismissibleUpsell" // kilocode_change: unused
 // import { useCloudUpsell } from "@src/hooks/useCloudUpsell" // kilocode_change: unused
@@ -121,6 +122,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		alwaysAllowModeSwitch,
 		showAutoApproveMenu, // kilocode_change
 		enableCheckpoints, // kilocode_change
+		chatRenderLimit, // kilocode_change
 		customModes,
 		telemetrySetting,
 		hasSystemPromptOverride,
@@ -174,12 +176,32 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		return getLatestTodo(messages)
 	}, [messages, currentTaskTodos])
 
-	const modifiedMessages = useMemo(() => combineApiRequests(combineCommandSequences(messages.slice(1))), [messages])
+	// kilocode_change start
+	// Performance: only render the last chatRenderLimit messages (plus the
+	// task message) in the chat. The full message list is still kept in memory so
+	// the header token/cost metrics stay accurate — see fullModified below.
+	const displayMessages = useMemo(
+		() => truncateMessagesForDisplay(messages, chatRenderLimit ?? 250),
+		[messages, chatRenderLimit],
+	)
+
+	const modifiedMessages = useMemo(
+		() => combineApiRequests(combineCommandSequences(displayMessages.slice(1))),
+		[displayMessages],
+	)
+
+	// Full metrics over the entire message list so the header stays accurate even
+	// when the rendered chat is truncated. O(n) once per message change, memoized.
+	const fullModified = useMemo(
+		() => combineApiRequests(combineCommandSequences(messages.slice(1))),
+		[messages],
+	)
+	// kilocode_change end
 
 	// Has to be after api_req_finished are all reduced into api_req_started messages.
 	// kilocode_change start
 	const apiMetrics = useMemo(() => {
-		const metrics = getApiMetrics(modifiedMessages)
+		const metrics = getApiMetrics(fullModified)
 		// use cumulative cost from backend if available, otherwise fall back to calculated cost
 		if (currentTaskCumulativeCost !== undefined) {
 			return {
@@ -188,7 +210,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 		}
 		return metrics
-	}, [modifiedMessages, currentTaskCumulativeCost])
+	}, [fullModified, currentTaskCumulativeCost])
 	// kilocode_change end
 
 	const [inputValue, setInputValue] = useState("")
