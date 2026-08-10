@@ -40,7 +40,7 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { NotificationService } from "./kilocode/NotificationService"
 import { safeWriteJson } from "../../utils/safeWriteJson"
-import { sanitizeMcpName } from "../../utils/mcp-name"
+import { decodeMcpName, sanitizeMcpName } from "../../utils/mcp-name"
 // kilocode_change start - MCP OAuth Authorization
 import { McpOAuthService, OAuthTokens } from "./oauth"
 // kilocode_change end
@@ -1155,6 +1155,22 @@ export class McpHub {
 				},
 				{
 					capabilities: {},
+					// kilocode_change start - Refresh the tool list when the server pushes list_changed
+					// notifications (the SDK silently skips these if the server doesn't advertise
+					// the listChanged capability).
+					listChanged: {
+						tools: {
+							onChanged: () => {
+								void this.handleToolsListChanged(name, source)
+							},
+						},
+						resources: {
+							onChanged: () => {
+								void this.handleToolsListChanged(name, source)
+							},
+						},
+					},
+					// kilocode_change end
 				},
 			)
 
@@ -1541,6 +1557,28 @@ export class McpHub {
 		}
 	}
 	// kilocode_change end
+
+	// kilocode_change start: method added
+	/**
+	 * Refresh a server's tool/resource lists after it pushes a list_changed
+	 * notification. This lets new tools appear without a full reconnect.
+	 * @param serverName The name of the server that changed
+	 * @param source Optional source to filter by (global or project)
+	 */
+	private async handleToolsListChanged(serverName: string, source?: "global" | "project"): Promise<void> {
+		try {
+			const connection = this.findConnection(serverName, source)
+			if (!connection || connection.type !== "connected") {
+				return
+			}
+			await this.fetchAvailableServerCapabilities(serverName, source)
+			await this.notifyWebviewOfServerChanges()
+		} catch (error) {
+			console.error(`Failed to refresh tools for "${serverName}" after list_changed:`, error)
+		}
+	}
+	// kilocode_change end
+
 	/**
 	 * Find a connection by sanitized server name.
 	 * This is used when parsing MCP tool responses where the server name has been
@@ -1554,7 +1592,27 @@ export class McpHub {
 			return exactMatch.server.name
 		}
 
-		return this.sanitizedNameRegistry.get(sanitizedServerName) ?? null
+		const registryMatch = this.sanitizedNameRegistry.get(sanitizedServerName)
+		if (registryMatch) {
+			return registryMatch
+		}
+
+		// Fallback: the parsed name may have been truncated by the 64-char cap
+		// in buildMcpToolName. Match the longest registered name that starts
+		// with the given (truncated) name so the server can still be resolved
+		// to its real connection. Comparison is done on the decoded form since
+		// parseMcpToolName decodes hyphens back before calling this method.
+		let bestMatch: string | null = null
+		let bestMatchLength = 0
+		for (const [sanitized, original] of this.sanitizedNameRegistry) {
+			const decoded = decodeMcpName(sanitized)
+			if (decoded.startsWith(sanitizedServerName) && decoded.length > bestMatchLength) {
+				bestMatch = original
+				bestMatchLength = decoded.length
+			}
+		}
+
+		return bestMatch
 	}
 
 	private async fetchToolsList(serverName: string, source?: "global" | "project"): Promise<McpTool[]> {

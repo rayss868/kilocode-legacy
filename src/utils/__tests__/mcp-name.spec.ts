@@ -166,6 +166,31 @@ describe("mcp-name utilities", () => {
 			// Hyphens are encoded as triple underscores
 			expect(buildMcpToolName("onellm", "atlassian-jira_search")).toBe("mcp--onellm--atlassian___jira_search")
 		})
+
+		it("should keep the server name intact and truncate only the tool when over 64 chars", () => {
+			const result = buildMcpToolName("playwright-extension", "b".repeat(60))
+			// "playwright___extension" is 22 chars, so the tool keeps 64-5-22-2=35
+			expect(result).toBe(`mcp--playwright___extension--${"b".repeat(35)}`)
+			expect(result.length).toBe(64)
+		})
+
+		it("should keep -- separators intact so the truncated name can still be parsed", () => {
+			const result = buildMcpToolName("playwright-extension", "b".repeat(60))
+			expect(parseMcpToolName(result)).toEqual({
+				serverName: "playwright-extension",
+				toolName: "b".repeat(35),
+			})
+		})
+
+		it("should not produce colliding names for distinct long tool names", () => {
+			expect(buildMcpToolName("server", "x".repeat(60))).not.toBe(buildMcpToolName("server", "y".repeat(60)))
+		})
+
+		it("should leave at least one tool character even for an extremely long server name", () => {
+			const result = buildMcpToolName("a".repeat(70), "tool")
+			expect(result.length).toBeLessThanOrEqual(64)
+			expect(result.endsWith("--t")).toBe(true)
+		})
 	})
 
 	describe("parseMcpToolName", () => {

@@ -326,6 +326,93 @@ describe("useMcpToolTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("executing MCP tool", error)
 		})
 
+		it("should append an actionable hint when callTool throws a timeout error", async () => {
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: vi
+						.fn()
+						.mockReturnValue([
+							{ name: "test_server", tools: [{ name: "test_tool", description: "desc" }] },
+						]),
+					callTool: vi.fn().mockRejectedValue(new Error("Request timed out after 60000ms")),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			mockAskApproval.mockResolvedValue(true)
+
+			const block: ToolUse = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test_server",
+					tool_name: "test_tool",
+					arguments: "{}",
+				},
+				partial: false,
+			}
+
+			await useMcpToolTool.handle(mockTask as Task, block as any, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				removeClosingTag: mockRemoveClosingTag,
+				toolProtocol: "xml",
+			})
+
+			expect(mockHandleError).toHaveBeenCalledWith("executing MCP tool", expect.objectContaining({}))
+			const errorArg = mockHandleError.mock.calls[0][1] as Error
+			expect(errorArg.message).toContain("timed out")
+			expect(errorArg.message).toContain("Hint:")
+		})
+
+		it("should append an actionable hint when the server returns an error result", async () => {
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: vi
+						.fn()
+						.mockReturnValue([
+							{ name: "test_server", tools: [{ name: "test_tool", description: "desc" }] },
+						]),
+					callTool: vi
+						.fn()
+						.mockResolvedValue({
+							content: [{ type: "text", text: "connection refused" }],
+							isError: true,
+						}),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			mockAskApproval.mockResolvedValue(true)
+
+			const block: ToolUse = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test_server",
+					tool_name: "test_tool",
+					arguments: "{}",
+				},
+				partial: false,
+			}
+
+			await useMcpToolTool.handle(mockTask as Task, block as any, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				removeClosingTag: mockRemoveClosingTag,
+				toolProtocol: "xml",
+			})
+
+			expect(mockTask.say).toHaveBeenCalledWith(
+				"mcp_server_response",
+				expect.stringContaining("Hint: The MCP server connection is down"),
+			)
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Hint:"))
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
 		it("should reject unknown tool names", async () => {
 			// Reset consecutiveMistakeCount for this test
 			mockTask.consecutiveMistakeCount = 0

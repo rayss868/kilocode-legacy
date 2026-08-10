@@ -18,6 +18,11 @@ export const MCP_TOOL_SEPARATOR = "--"
 export const MCP_TOOL_PREFIX = "mcp"
 
 /**
+ * Maximum length of a generated MCP tool function name (Gemini API limit).
+ */
+export const MAX_MCP_TOOL_NAME_LENGTH = 64
+
+/**
  * Encoding for hyphens in tool names.
  * We use triple underscores because:
  * 1. It's unlikely to appear naturally in tool names
@@ -131,12 +136,25 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 	// Build the full name: mcp--{server}--{tool}
 	const fullName = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
 
-	// Truncate if necessary (max 64 chars for Gemini)
-	if (fullName.length > 64) {
-		return fullName.slice(0, 64)
+	// Truncate by component (max 64 chars for Gemini) instead of slicing the
+	// whole string, so the "--" separators always survive and parseMcpToolName
+	// can still resolve the server. The server name keeps its identity since
+	// it is used to look up the connection; the tool name gets the remaining
+	// budget. Truncated tool names no longer match any real tool, so calls fail
+	// with a clear "tool not found" error instead of silently hitting another
+	// tool with a colliding prefix.
+	if (fullName.length <= MAX_MCP_TOOL_NAME_LENGTH) {
+		return fullName
 	}
 
-	return fullName
+	const prefix = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}`
+	// Leave at least 1 char of the tool name after an extremely long server name.
+	const maxServerLength = MAX_MCP_TOOL_NAME_LENGTH - prefix.length - MCP_TOOL_SEPARATOR.length - 1
+	const serverPart = sanitizedServer.slice(0, Math.max(maxServerLength, 1))
+	const remainingLength = MAX_MCP_TOOL_NAME_LENGTH - prefix.length - serverPart.length - MCP_TOOL_SEPARATOR.length
+	const toolPart = sanitizedTool.slice(0, Math.max(remainingLength, 1))
+
+	return `${prefix}${serverPart}${MCP_TOOL_SEPARATOR}${toolPart}`
 }
 
 /**

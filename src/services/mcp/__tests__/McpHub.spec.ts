@@ -7,6 +7,7 @@ import type { ClineProvider } from "../../../core/webview/ClineProvider"
 
 import type { McpHub as McpHubType, McpConnection, ConnectedMcpConnection, DisconnectedMcpConnection } from "../McpHub"
 import { ServerConfigSchema, McpHub } from "../McpHub"
+import { buildMcpToolName } from "../../../utils/mcp-name"
 
 // Mock fs/promises before importing anything that uses it
 vi.mock("fs/promises", () => ({
@@ -350,6 +351,63 @@ describe("McpHub", () => {
 			await expect(mcpHub.callTool("disabled-server", "test-tool", {})).rejects.toThrow(
 				"No connection found for server: disabled-server",
 			)
+		})
+	})
+
+	describe("findServerNameBySanitizedName", () => {
+		it("should resolve exact server names", async () => {
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			mcpHub.connections = []
+			mcpHub.connections = [
+				{
+					type: "connected",
+					server: {
+						name: "playwright-extension",
+						config: JSON.stringify({ command: "node", args: ["test.js"] }),
+						status: "connected",
+						source: "global",
+					},
+					client: {} as any,
+					transport: {} as any,
+				},
+			]
+			;(mcpHub as any).sanitizedNameRegistry.set("playwright___extension", "playwright-extension")
+			expect(mcpHub.findServerNameBySanitizedName("playwright-extension")).toBe("playwright-extension")
+		})
+
+		it("should resolve truncated server names via prefix fallback", async () => {
+			const longServerName = "a".repeat(70)
+			// buildMcpToolName truncates the server portion to 56 chars under the 64-char cap
+			const truncatedServerPart = buildMcpToolName(longServerName, "tool").slice("mcp--".length).split("--")[0]
+			expect(truncatedServerPart.length).toBe(56)
+
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			mcpHub.connections = []
+			mcpHub.connections = [
+				{
+					type: "connected",
+					server: {
+						name: longServerName,
+						config: JSON.stringify({ command: "node", args: ["test.js"] }),
+						status: "connected",
+						source: "global",
+					},
+					client: {} as any,
+					transport: {} as any,
+				},
+			]
+			;(mcpHub as any).sanitizedNameRegistry.set(longServerName, longServerName)
+
+			expect(mcpHub.findServerNameBySanitizedName(truncatedServerPart)).toBe(longServerName)
+		})
+
+		it("should return null when no server matches", async () => {
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			mcpHub.connections = []
+			expect(mcpHub.findServerNameBySanitizedName("no-such-server")).toBeNull()
 		})
 	})
 

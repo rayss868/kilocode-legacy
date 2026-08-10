@@ -22,6 +22,33 @@ type ValidationResult =
 			parsedArguments?: Record<string, unknown>
 	  }
 
+/**
+ * Classify an MCP error message and return a short, actionable hint for the model.
+ * Returns undefined when the error doesn't fit a known pattern.
+ */
+function getMcpToolErrorHint(errorText: string): string | undefined {
+	if (/timed\s?out|timeout|deadline exceeded/i.test(errorText)) {
+		return "The MCP server took too long to answer. This is usually transient — retry the same tool call once before changing approach."
+	}
+	if (/is disabled/i.test(errorText)) {
+		return "This MCP server is disabled. Ask the user to re-enable it in the MCP settings panel before calling its tools."
+	}
+	if (
+		/no connection found|connection refused|connection closed|econnrefused|econnreset|socket hang up|broken pipe|no response/i.test(
+			errorText,
+		)
+	) {
+		return "The MCP server connection is down. Check whether the server process is still running, then reconnect the server from the MCP settings panel before retrying."
+	}
+	if (/invalid json|unexpected token|invalid argument|json\.parse/i.test(errorText)) {
+		return "The server rejected the tool arguments. Verify the argument names and value types against the tool's input schema before calling it again."
+	}
+	if (/tool not found|unknown tool|no such tool/i.test(errorText)) {
+		return "No tool with this name exists on the server. Use the exact tool name from the list of available tools for this server."
+	}
+	return undefined
+}
+
 export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	readonly name = "use_mcp_tool" as const
 
@@ -81,7 +108,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				pushToolResult,
 			)
 		} catch (error) {
-			await handleError("executing MCP tool", error as Error)
+			const err = error as Error
+			if (err?.message) {
+				const hint = getMcpToolErrorHint(err.message)
+				if (hint) {
+					err.message = `${err.message}\n\nHint: ${hint}`
+				}
+			}
+			await handleError("executing MCP tool", err)
 		}
 	}
 
@@ -338,6 +372,13 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 				status: "error",
 				error: "No response from MCP server",
 			})
+		}
+
+		if (!toolResult || toolResult.isError) {
+			const hint = getMcpToolErrorHint(toolResultPretty)
+			if (hint) {
+				toolResultPretty += `\n\nHint: ${hint}`
+			}
 		}
 
 		await task.say("mcp_server_response", toolResultPretty)
