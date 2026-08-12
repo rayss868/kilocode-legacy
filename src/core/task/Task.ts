@@ -49,6 +49,9 @@ import {
 	isNativeProtocol,
 	QueuedMessage,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_LOOP_DETECTION_ENABLED, // kilocode_change
+	DEFAULT_LOOP_DETECTION_MAX_REPEATS, // kilocode_change
+	DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS, // kilocode_change
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
@@ -107,6 +110,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { LoopDetector } from "./loopDetector" // kilocode_change
 import { AssistantMessageParser } from "../assistant-message/AssistantMessageParser"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, truncateConversation, willManageContext } from "../context-management"
@@ -169,6 +173,12 @@ const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window error
 // kilocode_change start
 const MAX_CHUTES_TERMINATED_RETRY_ATTEMPTS = 2 // Allow up to 2 retries (3 total attempts) before failing fast
 // kilocode_change end
+// kilocode_change start
+// Injected into the next request when the model repeats the same tool call
+// `loopDetectionMaxRepeats` times in a row, to break out of the loop.
+const LOOP_INTERVENTION_MESSAGE =
+	"You have been repeating the same tool call with the same or near-identical input. This looks like an infinite loop. Stop repeating that call. Analyze the previous tool results, figure out what is going wrong, and try a genuinely different approach. If the task is already done, call attempt_completion."
+// kilocode_change end
 
 export interface TaskOptions extends CreateTaskOptions {
 	context: vscode.ExtensionContext // kilocode_change
@@ -180,6 +190,11 @@ export interface TaskOptions extends CreateTaskOptions {
 	enableBridge?: boolean
 	fuzzyMatchThreshold?: number
 	consecutiveMistakeLimit?: number
+	// kilocode_change start
+	loopDetectionEnabled?: boolean
+	loopDetectionMaxRepeats?: number
+	loopDetectionMaxInterventions?: number
+	// kilocode_change end
 	task?: string
 	images?: string[]
 	historyItem?: HistoryItem
@@ -397,6 +412,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
+	// kilocode_change start
+	loopDetectionEnabled: boolean
+	loopDetector: LoopDetector | undefined
+	// kilocode_change end
 	consecutiveMistakeCountForApplyDiff: Map<string, number> = new Map()
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
@@ -496,6 +515,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		enableBridge = false,
 		fuzzyMatchThreshold = 1.0,
 		consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+		loopDetectionEnabled = DEFAULT_LOOP_DETECTION_ENABLED, // kilocode_change
+		loopDetectionMaxRepeats = DEFAULT_LOOP_DETECTION_MAX_REPEATS, // kilocode_change
+		loopDetectionMaxInterventions = DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS, // kilocode_change
 		task,
 		images,
 		historyItem,
@@ -594,6 +616,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.diffEnabled = enableDiff
 		this.fuzzyMatchThreshold = fuzzyMatchThreshold
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
+		// kilocode_change start
+		this.loopDetectionEnabled =
+			loopDetectionEnabled ?? DEFAULT_LOOP_DETECTION_ENABLED
+		this.loopDetector = this.loopDetectionEnabled
+			? new LoopDetector(
+					Math.max(1, loopDetectionMaxRepeats ?? DEFAULT_LOOP_DETECTION_MAX_REPEATS),
+					Math.max(1, loopDetectionMaxInterventions ?? DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS),
+				)
+			: undefined
+		// kilocode_change end
 		this.providerRef = new WeakRef(provider)
 		// kilocode_change start: Handle CLI mode where globalStorageUri might not be properly set
 		this.globalStoragePath = provider.context?.globalStorageUri?.fsPath ?? this.getCliGlobalStoragePath()
@@ -3916,6 +3948,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Reset counter when tools are used successfully
 						this.consecutiveNoToolUseCount = 0
 					}
+
+					// kilocode_change start
+					// Loop detection: interrupt the model when it repeats the same tool call.
+					const loopAction = this.loopDetector?.update(this.assistantMessageContent)
+					if (loopAction === "intervene") {
+						this.userMessageContent.push({
+							type: "text",
+							text: LOOP_INTERVENTION_MESSAGE,
+						})
+						await this.say(
+							"text",
+							`Loop detection: the model repeated the same tool call ${this.loopDetector?.currentRepeatCount ?? 1} times. Injecting a directive to break the loop (intervention ${this.loopDetector?.currentInterventionCount}).`,
+						)
+					} else if (loopAction === "stop") {
+						await this.say(
+							"error",
+							"Loop detection: the model kept repeating the same tool call after several interventions. Stopping the task to prevent an infinite loop.",
+						)
+						return true
+					}
+					// kilocode_change end
 
 					// Push to stack if there's content OR if we're paused waiting for a subtask.
 					// When paused, we push an empty item so the loop continues to the pause check.

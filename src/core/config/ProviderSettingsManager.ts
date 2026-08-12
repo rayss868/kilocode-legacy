@@ -9,6 +9,9 @@ import {
 	isSecretStateKey,
 	ProviderSettingsEntry,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_LOOP_DETECTION_ENABLED, // kilocode_change
+	DEFAULT_LOOP_DETECTION_MAX_REPEATS, // kilocode_change
+	DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS, // kilocode_change
 	getModelId,
 	type ProviderName,
 	type ProfileType, // kilocode_change - autocomplete profile type system
@@ -49,6 +52,7 @@ export const providerProfilesSchema = z.object({
 			diffSettingsMigrated: z.boolean().optional(),
 			openAiHeadersMigrated: z.boolean().optional(),
 			consecutiveMistakeLimitMigrated: z.boolean().optional(),
+			loopDetectionMigrated: z.boolean().optional(), // kilocode_change
 			todoListEnabledMigrated: z.boolean().optional(),
 			morphApiKeyMigrated: z.boolean().optional(), // kilocode_change: Morph API key migration
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
@@ -82,6 +86,7 @@ export class ProviderSettingsManager {
 			diffSettingsMigrated: true, // Mark as migrated on fresh installs
 			openAiHeadersMigrated: true, // Mark as migrated on fresh installs
 			consecutiveMistakeLimitMigrated: true, // Mark as migrated on fresh installs
+			loopDetectionMigrated: true, // kilocode_change - Mark as migrated on fresh installs
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 		},
@@ -294,6 +299,14 @@ export class ProviderSettingsManager {
 					isDirty = true
 				}
 
+				// kilocode_change start
+				if (!providerProfiles.migrations.loopDetectionMigrated) {
+					await this.migrateLoopDetection(providerProfiles)
+					providerProfiles.migrations.loopDetectionMigrated = true
+					isDirty = true
+				}
+				// kilocode_change end
+
 				if (!providerProfiles.migrations.todoListEnabledMigrated) {
 					await this.migrateTodoListEnabled(providerProfiles)
 					providerProfiles.migrations.todoListEnabledMigrated = true
@@ -443,6 +456,22 @@ export class ProviderSettingsManager {
 			console.error(`[MigrateTodoListEnabled] Failed to migrate todo list enabled setting:`, error)
 		}
 	}
+
+	// kilocode_change start
+	private async migrateLoopDetection(providerProfiles: ProviderProfiles) {
+		try {
+			for (const [_name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				if (apiConfig.loopDetectionEnabled === undefined) {
+					apiConfig.loopDetectionEnabled = DEFAULT_LOOP_DETECTION_ENABLED
+					apiConfig.loopDetectionMaxRepeats = DEFAULT_LOOP_DETECTION_MAX_REPEATS
+					apiConfig.loopDetectionMaxInterventions = DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS
+				}
+			}
+		} catch (error) {
+			console.error(`[MigrateLoopDetection] Failed to migrate loop detection setting:`, error)
+		}
+	}
+	// kilocode_change end
 
 	/**
 	 * Apply model migrations for all providers

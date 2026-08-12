@@ -650,6 +650,14 @@
 			"unlimitedDescription": "Unlimited retries enabled (auto-proceed). The dialog will never appear.",
 			"warning": "⚠️ Setting to 0 allows unlimited retries which may consume significant API usage"
 		},
+		"loopDetection": {
+			"label": "Loop Detection",
+			"description": "Detect when the model repeats the same tool call over and over, then inject a directive to break the loop.",
+			"maxRepeatsLabel": "Repeats before intervening: {{value}}",
+			"maxRepeatsDescription": "Number of consecutive identical tool calls that triggers an intervention.",
+			"maxInterventionsLabel": "Max interventions: {{value}}",
+			"maxInterventionsDescription": "After this many interventions without effect, the task is stopped to prevent an infinite loop."
+		},
 		"reasoningEffort": {
 			"label": "Model Reasoning Effort",
 			"none": "None",

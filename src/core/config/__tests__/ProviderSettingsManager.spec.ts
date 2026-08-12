@@ -91,6 +91,7 @@ describe("ProviderSettingsManager", () => {
 						diffSettingsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
+						loopDetectionMigrated: true, // kilocode_change
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 					},
@@ -147,6 +148,7 @@ describe("ProviderSettingsManager", () => {
 						diffSettingsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
+						loopDetectionMigrated: true, // kilocode_change
 						todoListEnabledMigrated: true,
 						morphApiKeyMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
@@ -328,6 +330,48 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.test.todoListEnabled).toEqual(true)
 			expect(storedConfig.apiConfigs.existing.todoListEnabled).toEqual(false)
 			expect(storedConfig.migrations.todoListEnabledMigrated).toEqual(true)
+		})
+
+		it("should call migrateLoopDetection if it has not done so already", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+							loopDetectionEnabled: undefined,
+						},
+						test: {
+							apiProvider: "anthropic",
+							loopDetectionEnabled: undefined,
+						},
+						existing: {
+							apiProvider: "anthropic",
+							// we don't overwrite hand-edited values
+							loopDetectionEnabled: false,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						diffSettingsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						loopDetectionMigrated: false, // kilocode_change
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+			expect(storedConfig.apiConfigs.default.loopDetectionEnabled).toEqual(true)
+			expect(storedConfig.apiConfigs.default.loopDetectionMaxRepeats).toEqual(3)
+			expect(storedConfig.apiConfigs.default.loopDetectionMaxInterventions).toEqual(2)
+			expect(storedConfig.apiConfigs.test.loopDetectionEnabled).toEqual(true)
+			expect(storedConfig.apiConfigs.existing.loopDetectionEnabled).toEqual(false)
+			expect(storedConfig.migrations.loopDetectionMigrated).toEqual(true)
 		})
 
 		it("should apply model migrations for all providers", async () => {

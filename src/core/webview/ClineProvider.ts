@@ -1109,6 +1109,11 @@ export class ClineProvider
 			checkpointTimeout,
 			fuzzyMatchThreshold,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			// kilocode_change start
+			loopDetectionEnabled: apiConfiguration.loopDetectionEnabled,
+			loopDetectionMaxRepeats: apiConfiguration.loopDetectionMaxRepeats,
+			loopDetectionMaxInterventions: apiConfiguration.loopDetectionMaxInterventions,
+			// kilocode_change end
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -3332,6 +3337,11 @@ export class ClineProvider
 			checkpointTimeout,
 			fuzzyMatchThreshold,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			// kilocode_change start
+			loopDetectionEnabled: apiConfiguration.loopDetectionEnabled,
+			loopDetectionMaxRepeats: apiConfiguration.loopDetectionMaxRepeats,
+			loopDetectionMaxInterventions: apiConfiguration.loopDetectionMaxInterventions,
+			// kilocode_change end
 			task: text,
 			images,
 			experiments,

@@ -143,6 +143,7 @@ import { TodoListSettingsControl } from "./TodoListSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
+import { LoopDetectionControl } from "./LoopDetectionControl" // kilocode_change
 import { BedrockCustomArn } from "./providers/BedrockCustomArn"
 import { KiloCode } from "../kilocode/settings/providers/KiloCode" // kilocode_change
 import { RooBalanceDisplay } from "./providers/RooBalanceDisplay"
@@ -1195,6 +1196,14 @@ const ApiOptions = ({
 							}
 							onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
 						/>
+						{/* kilocode_change start */}
+						<LoopDetectionControl
+							enabled={apiConfiguration.loopDetectionEnabled}
+							maxRepeats={apiConfiguration.loopDetectionMaxRepeats}
+							maxInterventions={apiConfiguration.loopDetectionMaxInterventions}
+							onChange={(field, value) => setApiConfigurationField(field, value)}
+						/>
+						{/* kilocode_change end */}
 						{/* kilocode_change start
 						selectedProvider === "openrouter" &&
 							openRouterModelProviders &&

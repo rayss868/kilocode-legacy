@@ -39,6 +39,12 @@ import {
 
 export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
 
+// kilocode_change start
+export const DEFAULT_LOOP_DETECTION_ENABLED = true
+export const DEFAULT_LOOP_DETECTION_MAX_REPEATS = 3
+export const DEFAULT_LOOP_DETECTION_MAX_INTERVENTIONS = 2
+// kilocode_change end
+
 /**
  * DynamicProvider
  *
@@ -212,6 +218,13 @@ const baseProviderSettingsSchema = z.object({
 	rateLimitSeconds: z.number().optional(),
 	rateLimitAfter: z.boolean().optional(), // kilocode_change
 	consecutiveMistakeLimit: z.number().min(0).optional(),
+
+	// kilocode_change start
+	// Loop detection: interrupt the model when it repeats the same tool call.
+	loopDetectionEnabled: z.boolean().optional(),
+	loopDetectionMaxRepeats: z.number().min(1).optional(),
+	loopDetectionMaxInterventions: z.number().min(1).optional(),
+	// kilocode_change end
 
 	// Model reasoning.
 	enableReasoningEffort: z.boolean().optional(),
