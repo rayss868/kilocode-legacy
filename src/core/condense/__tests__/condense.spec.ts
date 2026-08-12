@@ -56,6 +56,18 @@ class MockApiHandler extends BaseProvider {
 const mockApiHandler = new MockApiHandler()
 const taskId = "test-task-id"
 
+// kilocode_change: builds enough messages to pass the N_MESSAGES_TO_KEEP + 2 guard
+function buildMessages(
+	count: number,
+	firstContent?: string | Anthropic.Messages.ContentBlockParam[],
+): ApiMessage[] {
+	return Array.from({ length: count }, (_, i) => ({
+		role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+		content: i === 0 && firstContent !== undefined ? firstContent : `Message ${i + 1}`,
+		ts: i + 1,
+	}))
+}
+
 describe("Condense", () => {
 	beforeEach(() => {
 		if (!TelemetryService.hasInstance()) {
@@ -65,17 +77,7 @@ describe("Condense", () => {
 
 	describe("summarizeConversation", () => {
 		it("should preserve the first message when summarizing", async () => {
-			const messages: ApiMessage[] = [
-				{ role: "user", content: "First message with /prr command content" },
-				{ role: "assistant", content: "Second message" },
-				{ role: "user", content: "Third message" },
-				{ role: "assistant", content: "Fourth message" },
-				{ role: "user", content: "Fifth message" },
-				{ role: "assistant", content: "Sixth message" },
-				{ role: "user", content: "Seventh message" },
-				{ role: "assistant", content: "Eighth message" },
-				{ role: "user", content: "Ninth message" },
-			]
+			const messages = buildMessages(14, "First message with /prr command content")
 
 			const result = await summarizeConversation(messages, mockApiHandler, "System prompt", taskId, 5000, false)
 
@@ -207,15 +209,7 @@ describe("Condense", () => {
 			}
 
 			const emptyHandler = new EmptyMockApiHandler()
-			const messages: ApiMessage[] = [
-				{ role: "user", content: "First message" },
-				{ role: "assistant", content: "Second" },
-				{ role: "user", content: "Third" },
-				{ role: "assistant", content: "Fourth" },
-				{ role: "user", content: "Fifth" },
-				{ role: "assistant", content: "Sixth" },
-				{ role: "user", content: "Seventh" },
-			]
+			const messages = buildMessages(14)
 
 			const result = await summarizeConversation(messages, emptyHandler, "System prompt", taskId, 5000, false)
 
@@ -274,6 +268,85 @@ describe("Condense", () => {
 			expect(result[1]).toEqual(messages[3]) // Second summary
 			expect(result[2]).toEqual(messages[4])
 			expect(result[3]).toEqual(messages[5])
+		})
+	})
+
+	describe("keep the most recent messages on a realistic user session", () => {
+		// Mirrors a real long session: a first message with the project recap, many
+		// interleaved user/assistant messages with tool_use/tool_result pairs, a giant
+		// "Task Completed" recap near the end, and a final short user ask.
+		// Regression: after condensing, the API must still receive the last N real
+		// messages (plus first + summary), not just the beginning of the conversation.
+		function buildRealisticSession(count: number): ApiMessage[] {
+			const giantRecap =
+				"Task Completed — Project sudah dibaca menggunakan MCP Codebase Memory pada project sekawan-catalog. " +
+				"Ringkasan hasil analisis: Stack utama: CodeIgniter 4 dengan PHP, ditambah CSS, HTML, JavaScript, dan SQL. " +
+				"Ukuran graph: 1.314 nodes dan 3.035 edges."
+			const messages: ApiMessage[] = [{ role: "user", content: giantRecap, ts: 1 }]
+			for (let i = 1; i < count - 1; i++) {
+				if (i % 3 === 0) {
+					messages.push({
+						role: "assistant",
+						content: [
+							{ type: "text", text: `Work on question center item ${i}` },
+							{ type: "tool_use", id: `tool-${i}`, name: "read_file", input: { path: "/app/detail.php" } },
+						],
+						ts: i + 1,
+					})
+				} else if (i % 3 === 1) {
+					messages.push({
+						role: "user",
+						content: [{ type: "tool_result", tool_use_id: `tool-${i - 1}`, content: "file contents here" }],
+						ts: i + 1,
+					})
+				} else {
+					messages.push({ role: "assistant", content: `Task Completed — continued work ${i}`, ts: i + 1 })
+				}
+			}
+			// Last message is the user's recent ask
+			messages.push({ role: "user", content: "ini harusnya gak ada kalau bukan admin", ts: count })
+			return messages
+		}
+
+		it("should keep the last N messages of a long session with giant recap messages", async () => {
+			const messages = buildRealisticSession(48)
+
+			const result = await summarizeConversation(messages, mockApiHandler, "System prompt", taskId, 200000, false)
+
+			expect(result.error).toBeUndefined()
+
+			const effectiveHistory = getEffectiveApiHistory(result.messages)
+
+			// first message + summary + last N kept messages
+			expect(effectiveHistory.length).toBe(2 + N_MESSAGES_TO_KEEP)
+
+			// The first message is preserved verbatim
+			expect(effectiveHistory[0]).toEqual(messages[0])
+			expect((effectiveHistory[1] as { isSummary?: boolean }).isSummary).toBe(true)
+
+			// The actual last N real messages (the recent conversation) are preserved in order
+			expect(effectiveHistory.slice(-N_MESSAGES_TO_KEEP)).toEqual(messages.slice(-N_MESSAGES_TO_KEEP))
+
+			// What the API ultimately receives: [first, summary, ...last N] - the recent ask
+			// and the messages right before it survive condensing.
+			const requestHistory = getMessagesSinceLastSummary(effectiveHistory)
+			expect(requestHistory[0]).toEqual(messages[0])
+			expect((requestHistory[1] as { isSummary?: boolean }).isSummary).toBe(true)
+			expect(requestHistory.slice(-N_MESSAGES_TO_KEEP)).toEqual(messages.slice(-N_MESSAGES_TO_KEEP))
+			expect(requestHistory[requestHistory.length - 1]).toEqual(messages[messages.length - 1])
+		})
+
+		it("should keep the recent ask even when the tail is full of giant recaps", async () => {
+			const messages = buildRealisticSession(60)
+
+			const result = await summarizeConversation(messages, mockApiHandler, "System prompt", taskId, 200000, false)
+
+			expect(result.error).toBeUndefined()
+
+			const requestHistory = getMessagesSinceLastSummary(getEffectiveApiHistory(result.messages))
+
+			// The final user message (recent ask) must be present after condensing
+			expect(requestHistory[requestHistory.length - 1].content).toBe("ini harusnya gak ada kalau bukan admin")
 		})
 	})
 })

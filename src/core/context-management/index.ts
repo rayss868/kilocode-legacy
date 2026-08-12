@@ -7,6 +7,7 @@ import { ApiHandler } from "../../api"
 import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
+import { countTokens } from "../../utils/countTokens" // kilocode_change
 
 /**
  * Context Management
@@ -31,13 +32,21 @@ export const TOKEN_BUFFER_PERCENTAGE = 0.1
  * @param {ApiHandler} apiHandler - The API handler to use for token counting
  * @returns {Promise<number>} A promise resolving to the token count
  */
+// kilocode_change start - use local tiktoken counting for internal estimates to avoid
+// provider network round-trips (e.g. Anthropic's countTokens endpoint) on hot paths.
 export async function estimateTokenCount(
 	content: Array<Anthropic.Messages.ContentBlockParam>,
 	apiHandler: ApiHandler,
 ): Promise<number> {
 	if (!content || content.length === 0) return 0
-	return apiHandler.countTokens(content)
+	try {
+		return await countTokens(content, { useWorker: false })
+	} catch (error) {
+		// Fall back to the provider's implementation if local counting fails
+		return apiHandler.countTokens(content)
+	}
 }
+// kilocode_change end
 
 /**
  * Result of truncation operation, includes the truncation ID for UI events.
@@ -326,22 +335,21 @@ export async function manageContext({
 
 		// Include system prompt tokens so this value matches what we send to the API.
 		// Note: `prevContextTokens` is computed locally here (totalTokens + lastMessageTokens).
-		let newContextTokensAfterTruncation = await estimateTokenCount(
-			[{ type: "text", text: systemPrompt }],
-			apiHandler,
-		)
-
+		// kilocode_change start - batch all content into a single count instead of N sequential
+		// provider count calls (tokenizes once, saving N-1 network/worker round-trips).
+		const contentBlocks: Array<Anthropic.Messages.ContentBlockParam> = [
+			{ type: "text", text: systemPrompt },
+		]
 		for (const msg of effectiveMessages) {
 			const content = msg.content
 			if (Array.isArray(content)) {
-				newContextTokensAfterTruncation += await estimateTokenCount(content, apiHandler)
+				contentBlocks.push(...content)
 			} else if (typeof content === "string") {
-				newContextTokensAfterTruncation += await estimateTokenCount(
-					[{ type: "text", text: content }],
-					apiHandler,
-				)
+				contentBlocks.push({ type: "text", text: content })
 			}
 		}
+		const newContextTokensAfterTruncation = await estimateTokenCount(contentBlocks, apiHandler)
+		// kilocode_change end
 
 		return {
 			messages: truncationResult.messages,

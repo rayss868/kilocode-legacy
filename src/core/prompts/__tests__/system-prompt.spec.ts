@@ -664,6 +664,116 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).toContain("## update_todo_list")
 	})
 
+	// kilocode_change start - todo list rendering into the system prompt
+	it("should render the current todo list into the system prompt when todoList is provided", async () => {
+		const settings = {
+			maxConcurrentFileReads: 5,
+			todoListEnabled: true,
+			useAgentRules: true,
+			newTaskRequireTodos: false,
+			toolProtocol: "xml" as const,
+		}
+		const todoList = [
+			{ id: "1", content: "Explore the codebase", status: "completed" as const },
+			{ id: "2", content: "Implement the fix", status: "in_progress" as const },
+			{ id: "3", content: "Run the tests", status: "pending" as const },
+		]
+
+		const prompt = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			undefined, // browserViewportSize
+			defaultModeSlug, // mode
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			undefined, // diffEnabled
+			experiments,
+			true, // enableMcpServerCreation
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			undefined, // partialReadsEnabled
+			settings, // settings
+			todoList, // todoList
+		)
+
+		expect(prompt).toContain("# TASK")
+		expect(prompt).toContain("- [x] Explore the codebase")
+		expect(prompt).toContain("- [-] Implement the fix")
+		expect(prompt).toContain("- [ ] Run the tests")
+	})
+
+	it("should not render todo list section when todoList is empty", async () => {
+		const settings = {
+			maxConcurrentFileReads: 5,
+			todoListEnabled: true,
+			useAgentRules: true,
+			newTaskRequireTodos: false,
+			toolProtocol: "xml" as const,
+		}
+
+		const prompt = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			undefined, // browserViewportSize
+			defaultModeSlug, // mode
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			undefined, // diffEnabled
+			experiments,
+			true, // enableMcpServerCreation
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			undefined, // partialReadsEnabled
+			settings, // settings
+			[], // todoList
+		)
+
+		expect(prompt).not.toContain("# TASK")
+	})
+
+	it("should not render todo list section when todoListEnabled is false", async () => {
+		const settings = {
+			maxConcurrentFileReads: 5,
+			todoListEnabled: false,
+			useAgentRules: true,
+			newTaskRequireTodos: false,
+			toolProtocol: "xml" as const,
+		}
+		const todoList = [{ id: "1", content: "Explore the codebase", status: "pending" as const }]
+
+		const prompt = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			undefined, // browserViewportSize
+			defaultModeSlug, // mode
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			undefined, // diffEnabled
+			experiments,
+			true, // enableMcpServerCreation
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			undefined, // partialReadsEnabled
+			settings, // settings
+			todoList, // todoList
+		)
+
+		expect(prompt).not.toContain("# TASK")
+	})
+	// kilocode_change end
+
 	it("should include update_todo_list tool when todoListEnabled is undefined", async () => {
 		const settings = {
 			maxConcurrentFileReads: 5,

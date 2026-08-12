@@ -128,9 +128,9 @@ export function getKeepMessagesWithToolBlocks(messages: ApiMessage[], keepCount:
 				continue
 			}
 
-			// Search backwards through the condensed region (bounded)
+			// Search backwards through the condensed region (bounded by the keep count)
 			const searchStart = startIndex - 1
-			const searchEnd = Math.max(0, startIndex - N_MESSAGES_TO_KEEP)
+			const searchEnd = Math.max(0, startIndex - keepCount) // kilocode_change: was N_MESSAGES_TO_KEEP
 			const messagesToSearch = messages.slice(searchEnd, searchStart + 1)
 
 			// Find the message containing this tool_use
@@ -157,7 +157,7 @@ export function getKeepMessagesWithToolBlocks(messages: ApiMessage[], keepCount:
 	}
 }
 
-export const N_MESSAGES_TO_KEEP = 3
+export const N_MESSAGES_TO_KEEP = 10 // kilocode_change: was 3
 export const MIN_CONDENSE_THRESHOLD = 5 // Minimum percentage of context window to trigger condensing
 export const MAX_CONDENSE_THRESHOLD = 100 // Maximum percentage of context window to trigger condensing
 

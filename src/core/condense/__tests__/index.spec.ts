@@ -34,6 +34,21 @@ vi.mock("@roo-code/telemetry", () => ({
 const taskId = "test-task-id"
 const DEFAULT_PREV_CONTEXT_TOKENS = 1000
 
+// kilocode_change: N_MESSAGES_TO_KEEP is now 10, so fixtures need more messages to pass the
+// "not enough messages" guard (messages.length must exceed N_MESSAGES_TO_KEEP + 1).
+// With count = 14 the keepStartIndex is 4, identical to the old count=7 / N=3 fixture.
+function buildMessages(
+	count: number,
+	firstContent?: string | Anthropic.Messages.ContentBlockParam[],
+	tsStart = 1,
+): ApiMessage[] {
+	return Array.from({ length: count }, (_, i) => ({
+		role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+		content: i === 0 && firstContent !== undefined ? firstContent : `Message ${i + 1}`,
+		ts: tsStart + i,
+	}))
+}
+
 describe("getKeepMessagesWithToolBlocks", () => {
 	it("should return keepMessages without tool blocks when no tool_result blocks in first kept message", () => {
 		const messages: ApiMessage[] = [
@@ -804,15 +819,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should summarize conversation and insert summary message", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		const result = await summarizeConversation(
 			messages,
@@ -865,15 +872,7 @@ describe("summarizeConversation", () => {
 
 	it("should handle empty summary response and return error", async () => {
 		// We need enough messages to trigger summarization
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Setup empty summary response with usage information
 		const emptyStream = (async function* () {
@@ -907,15 +906,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should correctly format the request to the API", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		await summarizeConversation(messages, mockApiHandler, defaultSystemPrompt, taskId, DEFAULT_PREV_CONTEXT_TOKENS)
 
@@ -936,15 +927,7 @@ describe("summarizeConversation", () => {
 		expect(mockCallArgs[mockCallArgs.length - 1]).toEqual(expectedFinalMessage)
 	})
 	it("should include the original first user message in summarization input", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Initial ask", ts: 1 },
-			{ role: "assistant", content: "Ack", ts: 2 },
-			{ role: "user", content: "Follow-up", ts: 3 },
-			{ role: "assistant", content: "Response", ts: 4 },
-			{ role: "user", content: "More", ts: 5 },
-			{ role: "assistant", content: "Later", ts: 6 },
-			{ role: "user", content: "Newest", ts: 7 },
-		]
+		const messages = buildMessages(14, "Initial ask")
 
 		await summarizeConversation(messages, mockApiHandler, defaultSystemPrompt, taskId, DEFAULT_PREV_CONTEXT_TOKENS)
 
@@ -963,15 +946,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should calculate newContextTokens correctly with systemPrompt", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		const systemPrompt = "You are a helpful assistant."
 
@@ -1003,15 +978,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should return error when new context tokens >= previous context tokens", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Create a stream that produces a summary
 		const streamWithLargeTokens = (async function* () {
@@ -1044,15 +1011,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should successfully summarize when new context tokens < previous context tokens", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Create a stream that produces a summary with reasonable token count
 		const streamWithSmallTokens = (async function* () {
@@ -1136,15 +1095,7 @@ describe("summarizeConversation", () => {
 	})
 
 	it("should return error when both condensing and main API handlers are invalid", async () => {
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Hi there", ts: 2 },
-			{ role: "user", content: "How are you?", ts: 3 },
-			{ role: "assistant", content: "I'm good", ts: 4 },
-			{ role: "user", content: "What's new?", ts: 5 },
-			{ role: "assistant", content: "Not much", ts: 6 },
-			{ role: "user", content: "Tell me more", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Create invalid handlers (missing createMessage)
 		const invalidMainHandler = {
@@ -1220,6 +1171,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Got it, the file says...", ts: 6 },
 			{ role: "user", content: "Thanks", ts: 7 },
+			{ role: "assistant", content: "Message 8", ts: 8 },
+			{ role: "user", content: "Message 9", ts: 9 },
+			{ role: "assistant", content: "Message 10", ts: 10 },
+			{ role: "user", content: "Message 11", ts: 11 },
+			{ role: "assistant", content: "Message 12", ts: 12 },
+			{ role: "user", content: "Message 13", ts: 13 },
+			{ role: "assistant", content: "Message 14", ts: 14 },
 		]
 
 		// Create a stream with usage information
@@ -1297,6 +1255,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Anything else?", ts: 5 },
 			{ role: "user", content: "Nope", ts: 6 },
+			{ role: "assistant", content: "Message 7", ts: 7 },
+			{ role: "user", content: "Message 8", ts: 8 },
+			{ role: "assistant", content: "Message 9", ts: 9 },
+			{ role: "user", content: "Message 10", ts: 10 },
+			{ role: "assistant", content: "Message 11", ts: 11 },
+			{ role: "user", content: "Message 12", ts: 12 },
+			{ role: "assistant", content: "Message 13", ts: 13 },
 		]
 
 		let capturedRequestMessages: any[] | undefined
@@ -1387,6 +1352,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Processing results", ts: 5 },
 			{ role: "user", content: "Thanks", ts: 6 },
+			{ role: "assistant", content: "Message 7", ts: 7 },
+			{ role: "user", content: "Message 8", ts: 8 },
+			{ role: "assistant", content: "Message 9", ts: 9 },
+			{ role: "user", content: "Message 10", ts: 10 },
+			{ role: "assistant", content: "Message 11", ts: 11 },
+			{ role: "user", content: "Message 12", ts: 12 },
+			{ role: "assistant", content: "Message 13", ts: 13 },
 		]
 
 		const result = await summarizeConversation(
@@ -1452,6 +1424,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Got it, the file says...", ts: 6 },
 			{ role: "user", content: "Thanks", ts: 7 },
+			{ role: "assistant", content: "Message 8", ts: 8 },
+			{ role: "user", content: "Message 9", ts: 9 },
+			{ role: "assistant", content: "Message 10", ts: 10 },
+			{ role: "user", content: "Message 11", ts: 11 },
+			{ role: "assistant", content: "Message 12", ts: 12 },
+			{ role: "user", content: "Message 13", ts: 13 },
+			{ role: "assistant", content: "Message 14", ts: 14 },
 		]
 
 		// Create a stream with usage information
@@ -1513,15 +1492,7 @@ describe("summarizeConversation", () => {
 		// "Missing `reasoning_content` field in the assistant message at message index 1"
 		// DeepSeek-reasoner requires reasoning_content on ALL assistant messages, not just those with tool_calls.
 		// After condensation, the summary becomes an assistant message that needs reasoning_content.
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Tell me a joke", ts: 1 },
-			{ role: "assistant", content: "Why did the programmer quit?", ts: 2 },
-			{ role: "user", content: "I don't know, why?", ts: 3 },
-			{ role: "assistant", content: "He didn't get arrays!", ts: 4 },
-			{ role: "user", content: "Another one please", ts: 5 },
-			{ role: "assistant", content: "Why do programmers prefer dark mode?", ts: 6 },
-			{ role: "user", content: "Why?", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Create a stream with usage information (no tool calls in this conversation)
 		const streamWithUsage = (async function* () {
@@ -1605,6 +1576,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Got it, the file says...", ts: 6 },
 			{ role: "user", content: "Thanks", ts: 7 },
+			{ role: "assistant", content: "Message 8", ts: 8 },
+			{ role: "user", content: "Message 9", ts: 9 },
+			{ role: "assistant", content: "Message 10", ts: 10 },
+			{ role: "user", content: "Message 11", ts: 11 },
+			{ role: "assistant", content: "Message 12", ts: 12 },
+			{ role: "user", content: "Message 13", ts: 13 },
+			{ role: "assistant", content: "Message 14", ts: 14 },
 		]
 
 		const streamWithUsage = (async function* () {
@@ -1694,6 +1672,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Got it, the file says...", ts: 6 },
 			{ role: "user", content: "Thanks", ts: 7 },
+			{ role: "assistant", content: "Message 8", ts: 8 },
+			{ role: "user", content: "Message 9", ts: 9 },
+			{ role: "assistant", content: "Message 10", ts: 10 },
+			{ role: "user", content: "Message 11", ts: 11 },
+			{ role: "assistant", content: "Message 12", ts: 12 },
+			{ role: "user", content: "Message 13", ts: 13 },
+			{ role: "assistant", content: "Message 14", ts: 14 },
 		]
 
 		const streamWithUsage = (async function* () {
@@ -1732,15 +1717,7 @@ describe("summarizeConversation", () => {
 		// Test that when the condensing API returns thinking blocks in the stream,
 		// they are captured and placed first in the summary message.
 		// This is the key fix for the Anthropic 400 error after condensation.
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Let me help", ts: 2 },
-			{ role: "user", content: "Please do something", ts: 3 },
-			{ role: "assistant", content: "Working on it", ts: 4 },
-			{ role: "user", content: "Continue", ts: 5 },
-			{ role: "assistant", content: "Done", ts: 6 },
-			{ role: "user", content: "Thanks", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Simulate condensing API response with thinking blocks
 		const streamWithThinking = (async function* () {
@@ -1790,15 +1767,7 @@ describe("summarizeConversation", () => {
 
 	it("should capture redacted_thinking blocks from condensing API response stream", async () => {
 		// Test that redacted_thinking blocks from stream are also captured
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Let me help", ts: 2 },
-			{ role: "user", content: "Please do something", ts: 3 },
-			{ role: "assistant", content: "Working on it", ts: 4 },
-			{ role: "user", content: "Continue", ts: 5 },
-			{ role: "assistant", content: "Done", ts: 6 },
-			{ role: "user", content: "Thanks", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Simulate condensing API response with redacted_thinking block
 		const streamWithRedactedThinking = (async function* () {
@@ -1881,6 +1850,13 @@ describe("summarizeConversation", () => {
 			},
 			{ role: "assistant", content: "Got it", ts: 6 },
 			{ role: "user", content: "Thanks", ts: 7 },
+			{ role: "assistant", content: "Message 8", ts: 8 },
+			{ role: "user", content: "Message 9", ts: 9 },
+			{ role: "assistant", content: "Message 10", ts: 10 },
+			{ role: "user", content: "Message 11", ts: 11 },
+			{ role: "assistant", content: "Message 12", ts: 12 },
+			{ role: "user", content: "Message 13", ts: 13 },
+			{ role: "assistant", content: "Message 14", ts: 14 },
 		]
 
 		// Simulate condensing API returning NEW thinking blocks
@@ -1933,15 +1909,7 @@ describe("summarizeConversation", () => {
 		// 1. From content_block_start (partial data)
 		// 2. From signature_delta (complete data)
 		// The code should use the last one with complete data
-		const messages: ApiMessage[] = [
-			{ role: "user", content: "Hello", ts: 1 },
-			{ role: "assistant", content: "Let me help", ts: 2 },
-			{ role: "user", content: "Please do something", ts: 3 },
-			{ role: "assistant", content: "Working on it", ts: 4 },
-			{ role: "user", content: "Continue", ts: 5 },
-			{ role: "assistant", content: "Done", ts: 6 },
-			{ role: "user", content: "Thanks", ts: 7 },
-		]
+		const messages = buildMessages(14)
 
 		// Simulate streaming with multiple ant_thinking chunks
 		const streamWithMultipleThinking = (async function* () {
@@ -1999,15 +1967,7 @@ describe("summarizeConversation with custom settings", () => {
 	const taskId = "test-task"
 
 	// Sample messages for testing
-	const sampleMessages: ApiMessage[] = [
-		{ role: "user", content: "Hello", ts: 1 },
-		{ role: "assistant", content: "Hi there", ts: 2 },
-		{ role: "user", content: "How are you?", ts: 3 },
-		{ role: "assistant", content: "I'm good", ts: 4 },
-		{ role: "user", content: "What's new?", ts: 5 },
-		{ role: "assistant", content: "Not much", ts: 6 },
-		{ role: "user", content: "Tell me more", ts: 7 },
-	]
+	const sampleMessages: ApiMessage[] = buildMessages(14)
 
 	beforeEach(() => {
 		// Reset mocks

@@ -109,7 +109,7 @@ import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { AssistantMessageParser } from "../assistant-message/AssistantMessageParser"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { manageContext, willManageContext } from "../context-management"
+import { manageContext, truncateConversation, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import { MultiFileSearchReplaceDiffStrategy } from "../diff/strategies/multi-file-search-replace"
@@ -4228,7 +4228,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					toolProtocol,
 					isStealthModel: modelInfo?.isStealthModel,
 				},
-				undefined, // todoList
+				this.todoList, // kilocode_change: render current todo list into system prompt
 				this.api.getModel().id,
 				provider.getSkillsManager(),
 				state, // kilocode_change
@@ -4608,8 +4608,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (recondenseResult.error) {
 				console.error(`[Task#${this.taskId}] Re-condensation failed: ${recondenseResult.error}`)
-				// Don't throw - let it continue and potentially fail with context overflow
-				// User will see the error and can manually handle it
+				// kilocode_change start
+				// Don't send the full uncondensed raw history to the API when re-condensing
+				// fails: the provider clips an over-long context from the middle/end, so the
+				// model only sees the oldest messages (it repeats the start of the
+				// conversation) and never reaches the most recent ones. Fall back to
+				// sliding-window truncation, which keeps the recent half visible and hides the
+				// old region behind a truncation marker.
+				const truncateResult = truncateConversation(this.apiConversationHistory, 0.5, this.taskId)
+				if (truncateResult.messages !== this.apiConversationHistory) {
+					this.apiConversationHistory = truncateResult.messages
+					await this.saveApiConversationHistory()
+					const contextTruncation: ContextTruncation = {
+						truncationId: truncateResult.truncationId,
+						messagesRemoved: truncateResult.messagesRemoved ?? 0,
+						prevContextTokens,
+						newContextTokens: 0,
+					}
+					await this.say(
+						"sliding_window_truncation",
+						undefined /* text */,
+						undefined /* images */,
+						false /* partial */,
+						undefined /* checkpoint */,
+						undefined /* progressStatus */,
+						{ isNonInteractive: true } /* options */,
+						undefined /* contextCondense */,
+						contextTruncation,
+					)
+				}
+				// kilocode_change end
 			} else {
 				console.log(
 					`[Task#${this.taskId}] Re-condensation successful - new context tokens: ${recondenseResult.newContextTokens}`,

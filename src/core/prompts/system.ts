@@ -142,6 +142,20 @@ async function generatePrompt(
 
 	const toolsCatalog = builtInToolsCatalog + customToolsSection
 
+	// kilocode_change start - render the current todo list into the system prompt so
+	// the model keeps reading its todo list even after conversation condensation.
+	const todoListEnabled = settings?.todoListEnabled !== false
+	const todoListSection =
+		todoList && todoList.length > 0 && todoListEnabled
+			? `\n\n# TASK\n${todoList
+					.map((todo) => {
+						const box = todo.status === "completed" ? "x" : todo.status === "in_progress" ? "-" : " "
+						return `- [${box}] ${todo.content}`
+					})
+					.join("\n")}`
+			: ""
+	// kilocode_change end
+
 	const basePrompt = `${roleDefinition}
 
 ${markdownFormattingSection()}
@@ -160,7 +174,7 @@ ${getRulesSection(cwd, settings, clineProviderState /* kilocode_change */)}
 
 ${getSystemInfoSection(cwd)}
 
-${getObjectiveSection()}
+${getObjectiveSection()}${todoListSection}
 
 ${await addCustomInstructions(baseInstructions, globalCustomInstructions || "", cwd, mode, {
 	language: language ?? formatLanguage(vscode.env.language),

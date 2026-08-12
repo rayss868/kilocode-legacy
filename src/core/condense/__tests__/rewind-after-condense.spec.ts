@@ -314,17 +314,18 @@ describe("Rewind After Condense - Issue #8295", () => {
 		describe("Message preservation after condense operations", () => {
 			/**
 			 * These tests verify that the correct user and assistant messages are preserved
-			 * and sent to the LLM after condense operations. With N_MESSAGES_TO_KEEP = 3,
+			 * and sent to the LLM after condense operations. They use hand-crafted storage
+			 * states to exercise the filtering logic (the real N_MESSAGES_TO_KEEP is now 10).
 			 * condense should always preserve:
 			 * - The first message (never condensed)
 			 * - The active summary
-			 * - The last 3 kept messages
+			 * - The kept messages (the last N)
 			 */
 
 			it("should preserve correct messages after single condense (10 messages)", () => {
 				const condenseId = "summary-single"
 
-				// Simulate storage state after condensing 10 messages with N_MESSAGES_TO_KEEP = 3
+				// Simulate storage state after condensing 10 messages
 				// Original: [msg1, msg2, msg3, msg4, msg5, msg6, msg7, msg8, msg9, msg10]
 				// After condense:
 				// - msg1 preserved (first message)
@@ -347,7 +348,7 @@ describe("Rewind After Condense - Issue #8295", () => {
 						isSummary: true,
 						condenseId,
 					},
-					// Last 3 kept messages (N_MESSAGES_TO_KEEP = 3)
+					// Simulated kept messages
 					{ role: "assistant", content: "Writing unit tests now", ts: 800 },
 					{ role: "user", content: "Include edge cases", ts: 900 },
 					{ role: "assistant", content: "Added edge case tests", ts: 1000 },
@@ -358,7 +359,7 @@ describe("Rewind After Condense - Issue #8295", () => {
 				// Should send exactly 5 messages to LLM:
 				// 1. First message (user) - preserved
 				// 2. Summary (assistant)
-				// 3-5. Last 3 kept messages
+				// 3-5. Simulated kept messages
 				expect(effective.length).toBe(5)
 
 				// Verify exact order and content
@@ -429,7 +430,7 @@ describe("Rewind After Condense - Issue #8295", () => {
 					{ role: "assistant", content: "Set up logging system", ts: 1600, condenseParent: condenseId2 },
 					{ role: "user", content: "Now write tests", ts: 1700, condenseParent: condenseId2 },
 
-					// Second summary - inserted before the last 3 kept messages
+					// Second summary - inserted before the kept messages
 					{
 						role: "assistant",
 						content: "Summary2: App complete with auth, DB, API, validation, errors, logging. Now testing.",
@@ -438,7 +439,7 @@ describe("Rewind After Condense - Issue #8295", () => {
 						condenseId: condenseId2,
 					},
 
-					// Last 3 kept messages (N_MESSAGES_TO_KEEP = 3)
+					// Simulated kept messages
 					{ role: "assistant", content: "Writing integration tests", ts: 1800 },
 					{ role: "user", content: "Test the auth flow", ts: 1900 },
 					{ role: "assistant", content: "Auth tests passing", ts: 2000 },
@@ -449,7 +450,7 @@ describe("Rewind After Condense - Issue #8295", () => {
 				// Should send exactly 5 messages to LLM:
 				// 1. First message (user) - preserved
 				// 2. Summary2 (assistant) - the ACTIVE summary
-				// 3-5. Last 3 kept messages
+				// 3-5. Simulated kept messages
 				expect(effective.length).toBe(5)
 
 				// Verify exact order and content
