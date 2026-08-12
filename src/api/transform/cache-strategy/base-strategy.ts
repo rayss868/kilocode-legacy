@@ -97,7 +97,22 @@ export abstract class CacheStrategy {
 	 * This implementation is based on the BaseProvider's countTokens method
 	 * but adapted to work without requiring an instance of BaseProvider
 	 */
+	// kilocode_change start - memoize per-message token estimates. Cache point
+	// placement slices the same message objects repeatedly (O(n) per range scan),
+	// so caching keeps the total cost at O(n) instead of O(n * ranges).
+	private messageTokenCache = new WeakMap<Anthropic.Messages.MessageParam, number>()
+
 	protected estimateTokenCount(message: Anthropic.Messages.MessageParam): number {
+		const cached = this.messageTokenCache.get(message)
+		if (cached !== undefined) {
+			return cached
+		}
+		const count = this.computeEstimateTokenCount(message)
+		this.messageTokenCache.set(message, count)
+		return count
+	}
+
+	private computeEstimateTokenCount(message: Anthropic.Messages.MessageParam): number {
 		// Use a more sophisticated token counting approach
 		if (!message.content) return 0
 
@@ -141,20 +156,25 @@ export abstract class CacheStrategy {
 
 		return Math.ceil(totalTokens)
 	}
+	// kilocode_change end
 
 	/**
 	 * Apply cache points to content blocks based on placements
 	 */
 	protected applyCachePoints(messages: Message[], placements: CachePointPlacement[]): Message[] {
 		const result: Message[] = []
+		// kilocode_change start - build an index map once instead of scanning placements
+		// for every message (O(n) instead of O(n * placements)).
+		const placementsByIndex = new Map(placements.map((p) => [p.index, p]))
 		for (let i = 0; i < messages.length; i++) {
-			const placement = placements.find((p) => p.index === i)
+			const placement = placementsByIndex.get(i)
 
 			if (placement) {
 				messages[i].content?.push(this.createCachePoint())
 			}
 			result.push(messages[i])
 		}
+		// kilocode_change end
 
 		return result
 	}

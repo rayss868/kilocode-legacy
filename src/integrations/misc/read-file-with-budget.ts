@@ -67,11 +67,11 @@ export async function readFileWithTokenBudget(
 			const currentBuffer = [...lineBuffer]
 			lineBuffer = []
 
-			// Count tokens for this chunk
+			// Count tokens for this chunk (in-process, avoiding a worker pool round-trip) // kilocode_change
 			let chunkTokens: number
 			try {
 				const contentBlocks: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: bufferText }]
-				chunkTokens = await countTokens(contentBlocks)
+				chunkTokens = await countTokens(contentBlocks, { useWorker: false }) // kilocode_change
 			} catch {
 				// Fallback: conservative estimate (2 chars per token)
 				chunkTokens = Math.ceil(bufferText.length / 2)
@@ -79,29 +79,60 @@ export async function readFileWithTokenBudget(
 
 			// Check if adding this chunk would exceed budget
 			if (tokenCount + chunkTokens > budgetTokens) {
-				// Need to find cutoff within this chunk using binary search
-				let low = 0
-				let high = currentBuffer.length
-				let bestFit = 0
-				let bestTokens = 0
+				// kilocode_change start - locate the cutoff with a cheap character-based
+				// estimate (4 chars per token, the standard heuristic) instead of a token
+				// count per search step, then verify the chosen content once with the real
+				// tokenizer. For non-Latin text the estimate can under-count; the refinement
+				// step below falls back to exact token counts in that case.
+				const remainingBudget = budgetTokens - tokenCount
+				const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 
-				while (low < high) {
-					const mid = Math.floor((low + high + 1) / 2)
-					const testContent = currentBuffer.slice(0, mid).join("\n")
-					let testTokens: number
+				let bestFit = 0
+				{
+					let low = 0
+					let high = currentBuffer.length
+					while (low < high) {
+						const mid = Math.floor((low + high + 1) / 2)
+						const testContent = currentBuffer.slice(0, mid).join("\n")
+						if (estimateTokens(testContent) <= remainingBudget) {
+							bestFit = mid
+							low = mid
+						} else {
+							high = mid - 1
+						}
+					}
+				}
+
+				const countContent = async (lineCountToCount: number): Promise<number> => {
+					if (lineCountToCount <= 0) return 0
+					const testContent = currentBuffer.slice(0, lineCountToCount).join("\n")
 					try {
 						const blocks: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: testContent }]
-						testTokens = await countTokens(blocks)
+						return await countTokens(blocks, { useWorker: false })
 					} catch {
-						testTokens = Math.ceil(testContent.length / 2)
+						return Math.ceil(testContent.length / 2)
 					}
+				}
 
-					if (tokenCount + testTokens <= budgetTokens) {
-						bestFit = mid
-						bestTokens = testTokens
-						low = mid
-					} else {
-						high = mid - 1
+				let bestTokens = await countContent(bestFit)
+
+				// The character estimate can under-count for non-Latin text (e.g. CJK),
+				// so if the real count exceeds the budget, refine with exact token counts.
+				if (bestTokens > remainingBudget && bestFit > 0) {
+					let low = 0
+					let high = bestFit
+					bestFit = 0
+					bestTokens = 0
+					while (low < high) {
+						const mid = Math.floor((low + high + 1) / 2)
+						const testTokens = await countContent(mid)
+						if (testTokens <= remainingBudget) {
+							bestFit = mid
+							bestTokens = testTokens
+							low = mid
+						} else {
+							high = mid - 1
+						}
 					}
 				}
 
@@ -112,6 +143,7 @@ export async function readFileWithTokenBudget(
 					tokenCount += bestTokens
 					lineCount += bestFit
 				}
+				// kilocode_change end
 				complete = false
 				return false
 			}
