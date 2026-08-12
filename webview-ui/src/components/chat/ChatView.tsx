@@ -1068,6 +1068,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 		// Remove the 500-message limit to prevent array index shifting
 		// Virtuoso is designed to efficiently handle large lists through virtualization
+		// kilocode_change start: Compute the effective tail (the last message that would
+		// render) so an empty aborted/errored response at the end of the conversation is
+		// kept visible instead of being filtered out, which made the panel look blank.
+		const alwaysHiddenTailSay = ["api_req_finished", "api_req_retried", "api_req_deleted", "mcp_server_request_started"]
+		const alwaysHiddenTailAsk = ["api_req_failed", "resume_task", "resume_completed_task"]
+		let effectiveTail: ClineMessage | undefined
+		for (let i = modifiedMessages.length - 1; i >= 0; i--) {
+			const m = modifiedMessages[i]
+			if (m.ask && alwaysHiddenTailAsk.includes(m.ask)) continue
+			if (m.say && alwaysHiddenTailSay.includes(m.say)) continue
+			effectiveTail = m
+			break
+		}
 		const newVisibleMessages = modifiedMessages.filter((message) => {
 			// Filter out checkpoint_saved messages that should be suppressed
 			if (message.say === "checkpoint_saved") {
@@ -1100,7 +1113,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				]
 				if (message.ask && alwaysHiddenOnceProcessedAsk.includes(message.ask)) return false
 				if (message.say && alwaysHiddenOnceProcessedSay.includes(message.say)) return false
-				if (message.say === "text" && (message.text ?? "") === "" && (message.images?.length ?? 0) === 0) {
+				// kilocode_change: keep the effective tail visible even when empty so an
+				// aborted/errored response doesn't leave the panel looking blank.
+				if (
+					message.say === "text" &&
+					(message.text ?? "") === "" &&
+					(message.images?.length ?? 0) === 0 &&
+					message !== effectiveTail
+				) {
 					return false
 				}
 				return true
@@ -1131,7 +1151,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "text":
-					if ((message.text ?? "") === "" && (message.images?.length ?? 0) === 0) return false
+					// kilocode_change: keep the effective tail visible even when empty so an
+					// aborted/errored response doesn't leave the panel looking blank.
+					if (
+						(message.text ?? "") === "" &&
+						(message.images?.length ?? 0) === 0 &&
+						message !== effectiveTail
+					) {
+						return false
+					}
 					break
 				case "mcp_server_request_started":
 					return false

@@ -50,6 +50,7 @@ import {
 	getModelId,
 } from "@roo-code/types"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
+import { StatePostThrottle } from "./statePostThrottle"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, BridgeOrchestrator, getRooCodeApiUrl } from "@roo-code/cloud"
 
@@ -182,9 +183,11 @@ export class ClineProvider
 	// kilocode_change start: Coalesce rapid postStateToWebview() calls (e.g. the burst of
 	// ~30 individual setting handlers fired by a single settings save) into a single post.
 	// Without this, each post serialized the full clineMessages array and an extra large
-	// conversation caused the extension host to OOM.
-	private lastStatePostTime = 0
+	// conversation caused the extension host to OOM. The throttle has a trailing edge so
+	// the FINAL post in a burst is never lost (e.g. the one carrying the restored message
+	// list after a checkpoint rewind, an abort, or a network error).
 	private static readonly STATE_POST_MIN_INTERVAL_MS = 30
+	private readonly statePostThrottle = new StatePostThrottle(ClineProvider.STATE_POST_MIN_INTERVAL_MS)
 	// kilocode_change end
 	private pendingOperations: Map<string, PendingEditOperation> = new Map()
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
@@ -2113,13 +2116,13 @@ export class ClineProvider
 		// immediately; subsequent calls within the short window are skipped. This preserves
 		// immediate streaming updates while preventing the extension host from serializing
 		// the full clineMessages array dozens of times per save (OOM on large conversations).
-		const now = Date.now()
-		if (now - this.lastStatePostTime < ClineProvider.STATE_POST_MIN_INTERVAL_MS) {
-			return
-		}
-		this.lastStatePostTime = now
+		// The StatePostThrottle adds a trailing edge so the newest state (including the last
+		// message list of a checkpoint rewind, abort, or error handling) is never lost.
+		await this.statePostThrottle.attempt(() => this.performStatePost())
 		// kilocode_change end
+	}
 
+	private async performStatePost() {
 		const state = await this.getStateToPostToWebview()
 		this.postMessageToWebview({ type: "state", state })
 
