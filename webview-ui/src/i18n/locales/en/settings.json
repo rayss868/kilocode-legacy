@@ -656,7 +656,7 @@
 			"maxRepeatsLabel": "Repeats before intervening: {{value}}",
 			"maxRepeatsDescription": "Number of consecutive identical tool calls that triggers an intervention.",
 			"maxInterventionsLabel": "Max interventions: {{value}}",
-			"maxInterventionsDescription": "After this many interventions without effect, the task is stopped to prevent an infinite loop."
+			"maxInterventionsDescription": "After this many interventions, the directive becomes firmer. The task is never stopped automatically."
 		},
 		"reasoningEffort": {
 			"label": "Model Reasoning Effort",

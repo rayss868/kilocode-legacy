@@ -2,18 +2,28 @@
 import type { AssistantMessageContent } from "../assistant-message"
 import type { McpToolUse, ToolUse } from "../../shared/tools"
 
+export interface LoopIntervention {
+	/** How many consecutive identical tool calls triggered this intervention. */
+	repeatCount: number
+	/**
+	 * True once `maxInterventions` have already been spent. The caller should
+	 * escalate its directive (firmer wording), but the task keeps running —
+	 * the loop is broken by guidance, not by force.
+	 */
+	escalated: boolean
+}
+
 /**
  * Detects when the model gets stuck repeating the same tool call over and over.
  *
  * Each completed assistant turn is fed via `update()`. A stable signature is
  * derived from the turn's tool calls (name + parameters); consecutive turns
  * with an identical signature count as repeats. Once `maxRepeats` consecutive
- * identical turns are seen, the detector returns an intervention:
- *
- * - "intervene" while interventions remain — the caller should inject a fresh
- *   directive into the next request to break the loop.
- * - "stop" once `maxInterventions` have been spent — the caller should end the
- *   task, since guidance alone is not breaking the loop.
+ * identical turns are seen, the detector returns a `LoopIntervention` so the
+ * caller can inject a fresh directive into the next request telling the model
+ * how many times it repeated the call and to change approach. Interventions
+ * keep coming on every further run of identical calls (marked `escalated` once
+ * `maxInterventions` are spent); the task is never stopped by this detector.
  *
  * Turns without any tool call reset the repeat counter (a pure text turn is not
  * a looping tool call).
@@ -37,10 +47,11 @@ export class LoopDetector {
 	}
 
 	/**
-	 * Feeds one completed assistant turn. Returns the action the caller should
-	 * take, or undefined when no loop is detected.
+	 * Feeds one completed assistant turn. Returns a `LoopIntervention` when the
+	 * model has repeated the same tool call `maxRepeats` times in a row, or
+	 * undefined when no loop is detected.
 	 */
-	update(content: AssistantMessageContent[]): "intervene" | "stop" | undefined {
+	update(content: AssistantMessageContent[]): LoopIntervention | undefined {
 		// A maxRepeats of 0 (or less) means the feature is effectively disabled.
 		if (this.maxRepeats <= 0) {
 			return undefined
@@ -60,12 +71,13 @@ export class LoopDetector {
 		}
 
 		if (this.repeatCount >= this.maxRepeats) {
-			if (this.interventionCount < this.maxInterventions) {
-				this.interventionCount++
-				this.repeatCount = 0 // re-arm: the next identical call re-triggers detection
-				return "intervene"
+			this.interventionCount++
+			const intervention: LoopIntervention = {
+				repeatCount: this.repeatCount,
+				escalated: this.interventionCount > this.maxInterventions,
 			}
-			return "stop"
+			this.repeatCount = 0 // re-arm: the next identical run re-triggers detection
+			return intervention
 		}
 		return undefined
 	}

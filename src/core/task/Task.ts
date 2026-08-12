@@ -175,9 +175,22 @@ const MAX_CHUTES_TERMINATED_RETRY_ATTEMPTS = 2 // Allow up to 2 retries (3 total
 // kilocode_change end
 // kilocode_change start
 // Injected into the next request when the model repeats the same tool call
-// `loopDetectionMaxRepeats` times in a row, to break out of the loop.
-const LOOP_INTERVENTION_MESSAGE =
-	"You have been repeating the same tool call with the same or near-identical input. This looks like an infinite loop. Stop repeating that call. Analyze the previous tool results, figure out what is going wrong, and try a genuinely different approach. If the task is already done, call attempt_completion."
+// `loopDetectionMaxRepeats` times in a row, to break out of the loop. The
+// repeat count tells the model how stuck it is; `escalated` sharpens the tone
+// once `loopDetectionMaxInterventions` have already been spent.
+function buildLoopInterventionMessage(repeatCount: number, escalated: boolean): string {
+	const base =
+		`You have repeated the same tool call ${repeatCount} times in a row. This looks like an infinite loop. ` +
+		"Stop repeating that call. Analyze the previous tool results, figure out what is going wrong, and try a genuinely different approach. " +
+		"If the task is already done, call attempt_completion."
+	if (!escalated) {
+		return base
+	}
+	return (
+		base +
+		" This loop has now persisted across multiple requests despite earlier warnings. Do not repeat that call again: pick a new strategy, even if it means re-reading context or asking the user for clarification."
+	)
+}
 // kilocode_change end
 
 export interface TaskOptions extends CreateTaskOptions {
@@ -3950,23 +3963,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 
 					// kilocode_change start
-					// Loop detection: interrupt the model when it repeats the same tool call.
-					const loopAction = this.loopDetector?.update(this.assistantMessageContent)
-					if (loopAction === "intervene") {
+					// Loop detection: when the model repeats the same tool call, tell it how many
+					// times it has repeated and to change approach. Never stops the task.
+					const loopIntervention = this.loopDetector?.update(this.assistantMessageContent)
+					if (loopIntervention) {
 						this.userMessageContent.push({
 							type: "text",
-							text: LOOP_INTERVENTION_MESSAGE,
+							text: buildLoopInterventionMessage(loopIntervention.repeatCount, loopIntervention.escalated),
 						})
 						await this.say(
 							"text",
-							`Loop detection: the model repeated the same tool call ${this.loopDetector?.currentRepeatCount ?? 1} times. Injecting a directive to break the loop (intervention ${this.loopDetector?.currentInterventionCount}).`,
+							`Loop detection: the model repeated the same tool call ${loopIntervention.repeatCount} times in a row. Injecting a directive to change approach (intervention ${this.loopDetector?.currentInterventionCount}).`,
 						)
-					} else if (loopAction === "stop") {
-						await this.say(
-							"error",
-							"Loop detection: the model kept repeating the same tool call after several interventions. Stopping the task to prevent an infinite loop.",
-						)
-						return true
 					}
 					// kilocode_change end
 
