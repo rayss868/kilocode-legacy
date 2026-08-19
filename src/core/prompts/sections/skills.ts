@@ -1,6 +1,8 @@
 import type { SkillsManager } from "../../../services/skills/SkillsManager"
 
-type SkillsManagerLike = Pick<SkillsManager, "getSkillsForMode">
+type SkillsManagerLike = Pick<SkillsManager, "getSkillsForMode"> & {
+	waitUntilReady?: () => Promise<void>
+}
 
 function escapeXml(value: string): string {
 	return value
@@ -24,6 +26,8 @@ export async function getSkillsSection(
 	currentMode: string | undefined,
 ): Promise<string> {
 	if (!skillsManager || !currentMode) return ""
+
+	await skillsManager.waitUntilReady?.()
 
 	// Get skills filtered by current mode (with override resolution)
 	const skills = skillsManager.getSkillsForMode(currentMode)
@@ -59,23 +63,31 @@ Step 1: Skill Evaluation
 
 Step 2: Branching Decision
 
+<if_skill_inventory_requested>
+- If the user asks what skills are available, asks you to list or describe the available skills, or asks what skills you have, answer directly from the current <available_skills> metadata.
+- Do NOT call 'load_skill' merely to list available skills.
+- Do NOT inspect the filesystem, use directory listing tools, or run commands to rediscover the skill list.
+</if_skill_inventory_requested>
+
 <if_skill_applies>
-- Select EXACTLY ONE skill.
-- Prefer the most specific skill when multiple skills match.
-- Read the full SKILL.md file at the skill's <location>.
-- Load the SKILL.md contents fully into context BEFORE continuing.
-- Follow the SKILL.md instructions precisely.
+- If the user explicitly asks whether a skill exists by name, or asks you to use, inspect, check, or follow a skill, you MUST call the 'load_skill' tool first.
+- Pass the user's original wording as the query; do not invent a filesystem path.
+- 'load_skill' supports partial names, case-insensitive matching, separator-insensitive matching for spaces, hyphens, and underscores, and reversed word order.
+- If 'load_skill' returns multiple similarly relevant candidates, ask the user for clarification instead of choosing silently.
+- Select EXACTLY ONE skill only after the lookup is unambiguous.
+- Follow the loaded SKILL.md instructions precisely before continuing.
 - Do NOT respond outside the skill-defined flow.
 </if_skill_applies>
 
 <if_no_skill_applies>
 - Proceed with a normal response.
 - Do NOT load any SKILL.md files.
+- Unrelated requests must not call 'load_skill'.
 </if_no_skill_applies>
 
 CONSTRAINTS:
 - Do NOT load every SKILL.md up front.
-- Load SKILL.md ONLY after a skill is selected.
+- Load SKILL.md ONLY through 'load_skill' after a skill is selected.
 - Do NOT skip this check.
 - FAILURE to perform this check is an error.
 </mandatory_skill_check>

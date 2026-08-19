@@ -12,6 +12,7 @@ vi.mock("react-i18next", () => ({
 			const translations: Record<string, string> = {
 				"chat:slashCommand.wantsToRun": "Roo wants to run slash command:",
 				"chat:slashCommand.didRun": "Roo ran slash command:",
+				"chat:skills.wantsToLoad": "Kilo Code wants to load skill:",
 			}
 			return translations[key] || key
 		},
@@ -57,6 +58,29 @@ const mockOnSuggestionClick = vi.fn()
 const mockOnBatchFileResponse = vi.fn()
 const mockOnFollowUpUnmount = vi.fn()
 
+describe("ChatRow - loadSkill tool", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("should display the skill query in an approval message", () => {
+		const message: any = {
+			type: "ask",
+			ask: "tool",
+			ts: Date.now(),
+			text: JSON.stringify({
+				tool: "loadSkill",
+				query: "human writer",
+			}),
+			partial: false,
+		}
+
+		const { getByText } = renderChatRowWithProviders(message)
+
+		expect(getByText("Kilo Code wants to load skill:")).toBeInTheDocument()
+		expect(getByText("human writer")).toBeInTheDocument()
+	})
+})
 describe("ChatRow - runSlashCommand tool", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

@@ -1134,6 +1134,11 @@ export class ClineProvider
 			// Properly dispose of the old task to ensure garbage collection
 			const oldTask = this.clineStack[stackIndex]
 
+			// Replace the task in the stack before awaiting the old task's abort so
+			// state posts during cancellation always see a valid current task.
+			this.clineStack[stackIndex] = task
+			task.emit(RooCodeEventName.TaskFocused)
+
 			// Abort the old task to stop running processes and mark as abandoned
 			try {
 				await oldTask.abortTask(true)
@@ -1149,10 +1154,6 @@ export class ClineProvider
 				cleanupFunctions.forEach((cleanup) => cleanup())
 				this.taskEventListeners.delete(oldTask)
 			}
-
-			// Replace the task in the stack
-			this.clineStack[stackIndex] = task
-			task.emit(RooCodeEventName.TaskFocused)
 
 			// Perform preparation tasks and set up event listeners
 			await this.performPreparationTasks(task)

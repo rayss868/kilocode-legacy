@@ -318,6 +318,41 @@ describe("Cline", () => {
 	})
 
 	describe("constructor", () => {
+		it("initializes adaptive task state from the user request", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "Fix the login timeout",
+				startTask: false,
+				context: mockExtensionContext,
+			})
+
+			expect(cline.getAdaptiveTaskState()).toMatchObject({
+				phase: "understanding",
+				objective: "Fix the login timeout",
+			})
+		})
+
+		it("updates adaptive task state through its lifecycle API", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "Fix the login timeout",
+				startTask: false,
+				context: mockExtensionContext,
+			})
+
+			cline.setAdaptiveTaskPhase("recovering")
+			cline.recordAdaptiveTaskIssue("command failed")
+			cline.recordAdaptiveTaskStep("Read the error output")
+
+			expect(cline.getAdaptiveTaskState()).toMatchObject({
+				phase: "recovering",
+				discoveredIssues: ["command failed"],
+				completedSteps: ["Read the error output"],
+			})
+		})
+
 		it("should respect provided settings", async () => {
 			const cline = new Task({
 				provider: mockProvider,
@@ -1638,6 +1673,7 @@ describe("Cline", () => {
 
 		describe("submitUserMessage", () => {
 			it("should always route through webview sendMessage invoke", async () => {
+				vi.spyOn(mockProvider, "getSkillsManager").mockReturnValue(undefined)
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -1668,6 +1704,175 @@ describe("Cline", () => {
 				})
 			})
 
+
+			it("should load a clear implicit skill before posting the user message", async () => {
+				const loadSkillContentByName = vi.fn().mockResolvedValue({
+					name: "human-like-writer",
+					description: "Writes natural prose",
+					path: "/skills/human-like-writer/SKILL.md",
+					source: "global",
+					instructions: "Use a natural, human voice.",
+				})
+				const resolveSkillApplicability = vi.fn().mockResolvedValue({
+					status: "matched",
+					match: {
+						skill: {
+							name: "human-like-writer",
+							description: "Writes natural prose",
+							path: "/skills/human-like-writer/SKILL.md",
+							source: "global",
+						},
+						score: 80,
+					},
+					alternatives: [],
+				})
+				const events: string[] = []
+				const skillsManager = {
+					waitUntilReady: vi.fn().mockResolvedValue(undefined),
+					getSkillsForMode: vi.fn().mockReturnValue([]),
+					resolveSkillApplicability,
+					loadSkillContentByName,
+				}
+				mockProvider.getSkillsManager = vi.fn().mockReturnValue(skillsManager)
+				mockProvider.postMessageToWebview.mockImplementation(async () => {
+					events.push("post")
+				})
+				loadSkillContentByName.mockImplementation(async () => {
+					events.push("load")
+					return {
+						name: "human-like-writer",
+						description: "Writes natural prose",
+						path: "/skills/human-like-writer/SKILL.md",
+						source: "global",
+						instructions: "Use a natural, human voice.",
+					}
+				})
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+					context: mockExtensionContext,
+				})
+
+				await task.submitUserMessage("Write this naturally")
+
+				expect(loadSkillContentByName).toHaveBeenCalledWith("human-like-writer", expect.any(String))
+				expect(events).toEqual(["load", "post"])
+				await expect(task.getSystemPrompt()).resolves.toContain("Use a natural, human voice.")
+			})
+
+
+			it("should ask for clarification instead of posting an ambiguous request", async () => {
+				const resolveSkillApplicability = vi.fn().mockResolvedValue({
+					status: "ambiguous",
+					matches: [
+						{
+							skill: {
+								name: "technical-writer",
+							description: "Writes technical documentation",
+								path: "/skills/technical-writer/SKILL.md",
+							source: "global",
+							},
+							score: 60,
+						},
+						{
+							skill: {
+								name: "human-like-writer",
+								description: "Writes natural prose",
+								path: "/skills/human-like-writer/SKILL.md",
+								source: "global",
+							},
+							score: 55,
+						},
+					],
+				})
+				const skillsManager = {
+					waitUntilReady: vi.fn().mockResolvedValue(undefined),
+					getSkillsForMode: vi.fn().mockReturnValue([]),
+					resolveSkillApplicability,
+					loadSkillContentByName: vi.fn(),
+				}
+				mockProvider.getSkillsManager = vi.fn().mockReturnValue(skillsManager)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+					context: mockExtensionContext,
+				})
+				const askSpy = vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse" } as never)
+
+				await task.submitUserMessage("Write this in a flexible style")
+
+				expect(askSpy).toHaveBeenCalledWith("followup", expect.stringContaining("technical-writer"))
+				expect(skillsManager.loadSkillContentByName).not.toHaveBeenCalled()
+				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalledWith(
+					expect.objectContaining({ invoke: "sendMessage" }),
+			)
+			})
+
+			it("continues without skill instructions when loading fails", async () => {
+				const resolveSkillApplicability = vi.fn().mockResolvedValue({
+					status: "matched",
+					match: {
+						skill: {
+							name: "human-like-writer",
+							description: "Writes natural prose",
+							path: "/skills/human-like-writer/SKILL.md",
+							source: "global",
+						},
+						score: 80,
+					},
+					alternatives: [],
+				})
+				const skillsManager = {
+					waitUntilReady: vi.fn().mockResolvedValue(undefined),
+					getSkillsForMode: vi.fn().mockReturnValue([]),
+					resolveSkillApplicability,
+					loadSkillContentByName: vi.fn().mockRejectedValue(new Error("ENOENT")),
+				}
+				mockProvider.getSkillsManager = vi.fn().mockReturnValue(skillsManager)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+					context: mockExtensionContext,
+				})
+
+				await task.submitUserMessage("Write this naturally")
+
+				expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({ invoke: "sendMessage" }),
+				)
+				await expect(task.getSystemPrompt()).resolves.not.toContain("<active_skill_instructions")
+			})
+
+			it("does not auto-resolve inventory or explicit skill requests", async () => {
+				const resolveSkillApplicability = vi.fn()
+				const skillsManager = {
+					waitUntilReady: vi.fn().mockResolvedValue(undefined),
+					getSkillsForMode: vi.fn().mockReturnValue([]),
+					resolveSkillApplicability,
+					loadSkillContentByName: vi.fn(),
+				}
+				mockProvider.getSkillsManager = vi.fn().mockReturnValue(skillsManager)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+					context: mockExtensionContext,
+				})
+
+				await task.submitUserMessage("skill mu ada apa aja")
+				await task.submitUserMessage("pakai skill human writer")
+
+				expect(resolveSkillApplicability).not.toHaveBeenCalled()
+			})
+
 			it("should handle empty messages gracefully", async () => {
 				const task = new Task({
 					provider: mockProvider,
@@ -1689,6 +1894,7 @@ describe("Cline", () => {
 			})
 
 			it("should route through webview for both new and existing tasks", async () => {
+				vi.spyOn(mockProvider, "getSkillsManager").mockReturnValue(undefined)
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -1990,7 +2196,7 @@ describe("Cline", () => {
 				expect(cancelSpy).toHaveBeenCalled()
 			})
 		})
-	})
+})
 })
 
 describe("Queued message processing after condense", () => {

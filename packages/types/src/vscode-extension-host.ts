@@ -1281,6 +1281,7 @@ export interface ClineSayTool {
 		| "codebaseSearch"
 		| "readFile"
 		| "fetchInstructions"
+		| "loadSkill"
 		| "listFilesTopLevel"
 		| "listFilesRecursive"
 		| "searchFiles"

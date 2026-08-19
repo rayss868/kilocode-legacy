@@ -150,6 +150,12 @@ import {
 	uncondenseForExtendedThinking,
 } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
+import {
+	applyAdaptiveTaskEvent,
+	createAdaptiveTaskState,
+	type AdaptiveTaskPhase,
+	type AdaptiveTaskState,
+} from "./adaptiveTaskState"
 
 import {
 	isAnyRecognizedKiloCodeError,
@@ -225,6 +231,37 @@ export interface TaskOptions extends CreateTaskOptions {
 
 type UserContent = Array<Anthropic.ContentBlockParam> // kilocode_change
 
+type ImplicitSkillPreflightState = {
+	messageKey?: string
+	status: "idle" | "completed" | "clarification" | "failed"
+	skillName?: string
+	instructions?: string
+	reason?: string
+}
+
+function isSkillInventoryRequest(text: string): boolean {
+	const normalizedText = text
+		.toLocaleLowerCase()
+		.replace(/[^\p{L}\p{N}]+/gu, " ")
+		.trim()
+
+	return (
+		/\b(list|show|describe)\b.*\b(skill|skills)\b/.test(normalizedText) ||
+		/\b(available|existing)\s+skills?\b/.test(normalizedText) ||
+		/\bwhat\s+skills?\s+(are\s+)?available\b/.test(normalizedText) ||
+		/\bwhat\s+skills?\s+do\s+you\s+have\b/.test(normalizedText) ||
+		/\bskill\s+(mu|kamu)\s+ada\s+apa\s+(aja|saja)\b/.test(normalizedText) ||
+		/\bskill\s+apa\s+(aja|saja)\b/.test(normalizedText) ||
+		/\bskills?\s+apa\s+yang\s+tersedia\b/.test(normalizedText)
+	)
+}
+
+function isExplicitSkillRequest(text: string): boolean {
+	const normalizedText = text.toLocaleLowerCase()
+	return /\b(load|use|pakai|gunakan|ikuti|follow)\b.*\bskill\b/.test(normalizedText) ||
+		/\bskill\b.*\b(ada|exists|tersedia|available)\b/.test(normalizedText)
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private context: vscode.ExtensionContext // kilocode_change
 
@@ -239,6 +276,61 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly metadata: TaskMetadata
 
 	todoList?: TodoItem[]
+	private adaptiveTaskState: AdaptiveTaskState
+	private implicitSkillPreflight: ImplicitSkillPreflightState = { status: "idle" }
+
+	public getAdaptiveTaskState(): AdaptiveTaskState {
+		return {
+			...this.adaptiveTaskState,
+			constraints: [...this.adaptiveTaskState.constraints],
+			completedSteps: [...this.adaptiveTaskState.completedSteps],
+			discoveredIssues: [...this.adaptiveTaskState.discoveredIssues],
+		}
+	}
+
+	public setAdaptiveTaskPhase(
+		phase: AdaptiveTaskPhase,
+		currentFocus?: string,
+		nextAction?: string,
+	): void {
+		this.adaptiveTaskState = applyAdaptiveTaskEvent(this.adaptiveTaskState, {
+			type: "phase_changed",
+			phase,
+			currentFocus,
+			nextAction,
+		})
+	}
+
+	public recordAdaptiveTaskIssue(issue: string): void {
+		this.adaptiveTaskState = applyAdaptiveTaskEvent(this.adaptiveTaskState, {
+			type: "issue_discovered",
+			issue,
+		})
+	}
+
+	public recordAdaptiveTaskStep(step: string): void {
+		this.adaptiveTaskState = applyAdaptiveTaskEvent(this.adaptiveTaskState, {
+			type: "step_completed",
+			step,
+		})
+	}
+
+	public syncAdaptiveTaskStateFromTodos(): void {
+		for (const todo of this.todoList ?? []) {
+			if (todo.status === "completed") {
+				this.recordAdaptiveTaskStep(todo.content)
+			}
+		}
+	}
+
+	public markAdaptiveCompletionRequested(): void {
+		this.setAdaptiveTaskPhase("verifying", "Verify the completed work", "Inspect the diff and run appropriate checks before completion")
+	}
+
+	public markAdaptiveCompletionRejected(reason: string): void {
+		this.setAdaptiveTaskPhase("recovering", "Recover from rejected completion", "Address the completion feedback and verify again")
+		this.recordAdaptiveTaskIssue(reason)
+	}
 
 	readonly rootTask: Task | undefined
 	readonly parentTask: Task | undefined
@@ -575,6 +667,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			task: historyItem ? historyItem.task : task,
 			images: historyItem ? [] : images,
 		}
+		this.adaptiveTaskState = createAdaptiveTaskState(this.metadata.task ?? "")
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1781,6 +1874,71 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// properly resumed.
 	}
 
+	private async preflightImplicitSkillSelection(text: string, provider: ClineProvider): Promise<boolean> {
+		if (isSkillInventoryRequest(text) || isExplicitSkillRequest(text)) {
+			return true
+		}
+
+		const skillsManager = provider.getSkillsManager?.()
+		if (!skillsManager) {
+			return true
+		}
+
+		const messageKey = text
+			.toLocaleLowerCase()
+			.replace(/[^\p{L}\p{N}]+/gu, " ")
+			.trim()
+
+		this.implicitSkillPreflight = { messageKey, status: "completed" }
+		const currentMode = await this.getTaskMode()
+		const applicability = await skillsManager.resolveSkillApplicability(text, currentMode)
+
+		if (applicability.status === "not_found") {
+			return true
+		}
+
+		if (applicability.status === "ambiguous") {
+			const candidates = applicability.matches
+				.slice(0, 3)
+				.map(({ skill }) => `- ${skill.name}: ${skill.description}`)
+				.join("\n")
+			this.implicitSkillPreflight = {
+				messageKey,
+				status: "clarification",
+				reason: "Multiple skills matched",
+			}
+			await this.ask(
+				"followup",
+				`Which skill should I use for this request?\n${candidates}`,
+			)
+			return false
+		}
+
+		try {
+			const content = await skillsManager.loadSkillContentByName(applicability.match.skill.name, currentMode)
+			if (!content) {
+				throw new Error(`Skill content not found: ${applicability.match.skill.name}`)
+			}
+			this.implicitSkillPreflight = {
+				messageKey,
+				status: "completed",
+				skillName: content.name,
+				instructions: content.instructions,
+			}
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			this.implicitSkillPreflight = { messageKey, status: "failed", reason }
+			this.recordAdaptiveTaskIssue(`Automatic skill loading failed: ${reason}`)
+			console.error("[Task#preflightImplicitSkillSelection] Failed to load skill:", error)
+		}
+
+		return true
+	}
+
+	private getActiveSkillInstructions(): string | undefined {
+		return this.implicitSkillPreflight.instructions
+	}
+
 	public async submitUserMessage(
 		text: string,
 		images?: string[],
@@ -1811,6 +1969,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (newState?.apiConfiguration) {
 						this.updateApiConfiguration(newState.apiConfiguration)
 					}
+				}
+
+				const skillsManager = provider.getSkillsManager?.()
+				if (skillsManager && !(await this.preflightImplicitSkillSelection(text, provider))) {
+					return
 				}
 
 				this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
@@ -2689,6 +2852,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		let nextUserContent = userContent
 		let includeFileDetails = true
 
+		this.setAdaptiveTaskPhase("planning")
 		this.emit(RooCodeEventName.TaskStarted)
 
 		while (!this.abort) {
@@ -3958,6 +4122,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							text: responseText,
 						})
 					} else {
+						this.setAdaptiveTaskPhase("implementing")
 						// Reset counter when tools are used successfully
 						this.consecutiveNoToolUseCount = 0
 					}
@@ -3967,6 +4132,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// times it has repeated and to change approach. Never stops the task.
 					const loopIntervention = this.loopDetector?.update(this.assistantMessageContent)
 					if (loopIntervention) {
+						this.setAdaptiveTaskPhase(
+							"recovering",
+							"Recover from repeated tool usage",
+							"Choose a different approach based on the intervention",
+						)
+						this.recordAdaptiveTaskIssue(
+							`Repeated the same tool call ${loopIntervention.repeatCount} times in a row`,
+						)
 						this.userMessageContent.push({
 							type: "text",
 							text: buildLoopInterventionMessage(loopIntervention.repeatCount, loopIntervention.escalated),
@@ -4260,7 +4433,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this._taskToolProtocol,
 			)
 
-			return SYSTEM_PROMPT(
+			// Wait for skill discovery before generating the system prompt.
+			await provider.getSkillsManager()?.waitUntilReady?.()
+
+			const systemPrompt = SYSTEM_PROMPT(
 				provider.context,
 				this.cwd,
 				canUseBrowserTool,
@@ -4288,13 +4464,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						.get<boolean>("newTaskRequireTodos", false),
 					toolProtocol,
 					isStealthModel: modelInfo?.isStealthModel,
+					adaptiveTaskState: this.getAdaptiveTaskState(),
 				},
 				this.todoList, // kilocode_change: render current todo list into system prompt
 				this.api.getModel().id,
 				provider.getSkillsManager(),
 				state, // kilocode_change
 			)
-		})()
+
+			const activeSkillInstructions = this.getActiveSkillInstructions()
+			return activeSkillInstructions
+				? `${systemPrompt}\n\n<active_skill_instructions name="${this.implicitSkillPreflight.skillName ?? "selected-skill"}">\n${activeSkillInstructions}\n</active_skill_instructions>`
+				: systemPrompt		})()
 	}
 
 	private getCurrentProfileId(state: any): string {
@@ -5266,6 +5447,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.toolUsage[toolName].failures++
+		this.setAdaptiveTaskPhase("recovering", `Recover from ${toolName} failure`, "Analyze the error and choose a different approach")
+		this.recordAdaptiveTaskIssue(`${toolName} failed${error ? `: ${error.slice(0, 200)}` : ""}`)
 
 		if (error) {
 			this.emit(RooCodeEventName.TaskToolFailed, this.taskId, toolName, error)

@@ -797,6 +797,15 @@ export const ChatRowContent = ({
 						</div>
 					</>
 				)
+			case "loadSkill":
+				return (
+					<div style={headerStyle}>
+						{toolIcon("file-code")}
+						<span style={{ fontWeight: "bold" }}>
+							{t("chat:skills.wantsToLoad")} <code className="font-medium">{tool.query}</code>
+						</span>
+					</div>
+				)
 			case "listFilesTopLevel":
 				return (
 					<>

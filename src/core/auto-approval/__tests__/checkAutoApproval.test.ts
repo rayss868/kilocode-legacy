@@ -62,4 +62,19 @@ describe("checkAutoApproval", () => {
 		const result = await checkAutoApproval({ state, ask: mockAsk, text })
 		expect(result).toEqual({ decision: "ask" })
 	})
+
+	it("should approve loadSkill when alwaysAllowReadOnly is true", async () => {
+		const state = {
+			alwaysAllowReadOnly: true,
+			autoApprovalEnabled: true,
+		} as ExtensionState
+
+		const text = JSON.stringify({
+			tool: "loadSkill",
+			query: "human writer",
+		})
+
+		const result = await checkAutoApproval({ state, ask: mockAsk, text })
+		expect(result).toEqual({ decision: "approve" })
+	})
 })

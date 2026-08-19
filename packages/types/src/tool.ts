@@ -33,6 +33,7 @@ export const toolNames = [
 	"switch_mode",
 	"new_task",
 	"fetch_instructions",
+	"load_skill",
 	"codebase_search",
 	// kilocode_change start
 	"fast_edit_file",

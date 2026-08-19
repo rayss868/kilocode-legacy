@@ -22,6 +22,7 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import { PromptVariables, loadSystemPromptFile } from "./sections/custom-system-prompt"
+import { getAdaptiveTaskStateSection } from "./sections/adaptive-task-state"
 
 import type { SystemPromptSettings } from "./types"
 import { getToolDescriptionsForMode } from "./tools"
@@ -156,6 +157,10 @@ async function generatePrompt(
 			: ""
 	// kilocode_change end
 
+	const adaptiveTaskStateSection = settings?.adaptiveTaskState
+		? `\n\n${getAdaptiveTaskStateSection(settings.adaptiveTaskState)}`
+		: ""
+
 	const basePrompt = `${roleDefinition}
 
 ${markdownFormattingSection()}
@@ -174,7 +179,7 @@ ${getRulesSection(cwd, settings, clineProviderState /* kilocode_change */)}
 
 ${getSystemInfoSection(cwd)}
 
-${getObjectiveSection()}${todoListSection}
+${getObjectiveSection()}${todoListSection}${adaptiveTaskStateSection}
 
 ${await addCustomInstructions(baseInstructions, globalCustomInstructions || "", cwd, mode, {
 	language: language ?? formatLanguage(vscode.env.language),
@@ -260,12 +265,14 @@ export const SYSTEM_PROMPT = async (
 			},
 		)
 
+		const skillsSection = await getSkillsSection(skillsManager, mode)
+
 		// For file-based prompts, don't include the tool sections
 		return `${roleDefinition}
 
 ${fileCustomSystemPrompt}
 
-${customInstructions}`
+${skillsSection ? `${skillsSection}\n\n` : ""}${customInstructions}${settings?.adaptiveTaskState ? `\n\n${getAdaptiveTaskStateSection(settings.adaptiveTaskState)}` : ""}`
 	}
 
 	// If diff is disabled, don't pass the diffStrategy

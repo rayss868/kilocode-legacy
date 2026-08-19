@@ -1762,6 +1762,37 @@ describe("ClineProvider", () => {
 		// kilocode_change end
 	})
 
+	describe("task replacement during cancellation", () => {
+		test("installs the replacement task before aborting the previous task", async () => {
+			let taskDuringAbort: unknown
+			const oldTask = {
+				taskId: "same-task-id",
+				instanceId: "old-instance",
+				abortTask: vi.fn(async () => {
+					taskDuringAbort = provider.getCurrentTask()
+				}),
+				emit: vi.fn(),
+			}
+			;(provider as any).clineStack = [oldTask]
+
+			const historyItem = {
+				id: "same-task-id",
+				ts: Date.now(),
+				task: "Canceled task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			expect(oldTask.abortTask).toHaveBeenCalledWith(true)
+			expect(taskDuringAbort).not.toBe(oldTask)
+		})
+	})
+
 	describe("createTaskWithHistoryItem mode validation", () => {
 		test("validates and falls back to default mode when restored mode no longer exists", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

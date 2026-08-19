@@ -208,6 +208,9 @@
 	"instructions": {
 		"wantsToFetch": "Kilo Code ingin mengambil instruksi detail untuk membantu tugas saat ini"
 	},
+	"skills": {
+		"wantsToLoad": "Kilo Code ingin memuat skill:"
+	},
 	"fileOperations": {
 		"wantsToRead": "Kilo Code ingin membaca file ini",
 		"wantsToReadMultiple": "Kilo Code ingin membaca beberapa file",

@@ -806,16 +806,143 @@ description: A test skill
 			expect(content?.instructions).toContain("1. Do this")
 		})
 
-		it("should return null for non-existent skill", async () => {
-			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
-			mockReaddir.mockResolvedValue([])
 
-			await skillsManager.discoverSkills()
+		it("should resolve and load a skill from a flexible query after waiting for discovery", async () => {
+			const testSkillDir = p(globalSkillsDir, "human-like-writer")
+			const testSkillMd = p(testSkillDir, "SKILL.md")
+			const skillContent = `---
+name: human-like-writer
+description: Writes natural prose
+---
 
-			const content = await skillsManager.getSkillContent("non-existent")
+# Human Writer
 
-			expect(content).toBeNull()
+Use a natural voice.`
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["human-like-writer"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === testSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === testSkillMd)
+			mockReadFile.mockResolvedValue(skillContent)
+
+			const result = await skillsManager.loadSkillByQuery("writer human", "code")
+
+			expect(result.status).toBe("loaded")
+			if (result.status === "loaded") {
+				expect(result.content.name).toBe("human-like-writer")
+				expect(result.content.instructions).toContain("# Human Writer")
+			}
+		})
+
+
+		it("should resolve implicit applicability only from skills available in the current mode", async () => {
+			const testSkillDir = p(globalSkillsDir, "human-like-writer")
+			const testSkillMd = p(testSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["human-like-writer"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === testSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === testSkillMd)
+			mockReadFile.mockResolvedValue(
+				`---\nname: human-like-writer\ndescription: Writes natural prose for human readers\n---\nInstructions`,
+			)
+
+			const result = await skillsManager.resolveSkillApplicability("write natural human prose", "code")
+
+			expect(result.status).toBe("matched")
+		if (result.status === "matched") {
+				expect(result.match.skill.name).toBe("human-like-writer")
+		}
+			expect(mockReadFile).toHaveBeenCalledWith(testSkillMd, "utf-8")
+		})
+
+		it("should load content only by the selected registered skill name", async () => {
+			const testSkillDir = p(globalSkillsDir, "human-like-writer")
+			const testSkillMd = p(testSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["human-like-writer"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === testSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === testSkillMd)
+			mockReadFile.mockResolvedValue(
+				`---\nname: human-like-writer\ndescription: Writes natural prose\n---\n# Human Writer\n\nUse a natural voice.`,
+			)
+
+			const content = await skillsManager.loadSkillContentByName("human-like-writer", "code")
+
+			expect(content?.name).toBe("human-like-writer")
+			expect(content?.instructions).toContain("Use a natural voice")
+			expect(mockReadFile).toHaveBeenCalledWith(testSkillMd, "utf-8")
+		})
+
+		it("should return ambiguity without loading either skill", async () => {
+			const skillNames = ["human-like-writer", "human-writer"]
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? skillNames : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (skillNames.some((name) => pathArg === p(globalSkillsDir, name))) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockResolvedValue(true)
+			mockReadFile.mockImplementation(async (file: string) => {
+				const name = skillNames.find((skillName) => file === p(globalSkillsDir, skillName, "SKILL.md"))
+				return `---\nname: ${name}\ndescription: Writes natural prose\n---\nInstructions`
+			})
+
+			const result = await skillsManager.loadSkillByQuery("natural writer", "code")
+
+			expect(result.status).toBe("ambiguous")
+			expect(mockReadFile).toHaveBeenCalledTimes(2)
+		})
+
+		it("should return not_found for a skill unavailable in the current mode", async () => {
+			const testSkillDir = p(globalSkillsCodeDir, "code-only")
+			const testSkillMd = p(testSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsCodeDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsCodeDir ? ["code-only"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === testSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === testSkillMd)
+			mockReadFile.mockResolvedValue(`---\nname: code-only\ndescription: Code-only skill\n---\nInstructions`)
+
+			const result = await skillsManager.loadSkillByQuery("code only", "ask")
+
+			expect(result.status).toBe("not_found")
+		})
+
+		it("should report a registered skill file that disappears before loading", async () => {
+			const testSkillDir = p(globalSkillsDir, "vanishing-skill")
+			const testSkillMd = p(testSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["vanishing-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === testSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === testSkillMd)
+			mockReadFile.mockResolvedValue(`---\nname: vanishing-skill\ndescription: Temporary skill\n---\nInstructions`)
+
+			await skillsManager.initialize()
+			mockReadFile.mockRejectedValueOnce(new Error("ENOENT"))
+
+			await expect(skillsManager.loadSkillByQuery("vanishing", "code")).rejects.toThrow("ENOENT")
 		})
 	})
 

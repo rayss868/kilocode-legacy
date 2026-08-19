@@ -75,10 +75,12 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	async execute(params: AttemptCompletionParams, task: Task, callbacks: AttemptCompletionCallbacks): Promise<void> {
 		const { result } = params
 		const { handleError, pushToolResult, askFinishSubTaskApproval } = callbacks
+		task.markAdaptiveCompletionRequested?.()
 
 		// Prevent attempt_completion if any tool failed in the current turn
 		if (task.didToolFailInCurrentTurn) {
 			const errorMsg = t("common:errors.attempt_completion_tool_failed")
+			task.markAdaptiveCompletionRejected?.(errorMsg)
 
 			await task.say("error", errorMsg)
 			pushToolResult(formatResponse.toolError(errorMsg))
@@ -92,13 +94,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		const hasIncompleteTodos = task.todoList && task.todoList.some((todo) => todo.status !== "completed")
 
 		if (preventCompletionWithOpenTodos && hasIncompleteTodos) {
+			const errorMsg = "Cannot complete task while there are incomplete todos. Please finish all todos before attempting completion."
 			task.consecutiveMistakeCount++
 			task.recordToolError("attempt_completion")
+			task.markAdaptiveCompletionRejected?.(errorMsg)
 
 			pushToolResult(
-				formatResponse.toolError(
-					"Cannot complete task while there are incomplete todos. Please finish all todos before attempting completion.",
-				),
+				formatResponse.toolError(errorMsg),
 			)
 
 			return
@@ -106,8 +108,10 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 		try {
 			if (!result) {
+				const errorMsg = "Missing completion result"
 				task.consecutiveMistakeCount++
 				task.recordToolError("attempt_completion")
+				task.markAdaptiveCompletionRejected?.(errorMsg)
 				pushToolResult(await task.sayAndCreateMissingParamError("attempt_completion", "result"))
 				return
 			}

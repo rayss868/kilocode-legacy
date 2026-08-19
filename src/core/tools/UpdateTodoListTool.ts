@@ -80,6 +80,7 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 			}
 
 			await setTodoListForTask(task, normalizedTodos)
+			task.syncAdaptiveTaskStateFromTodos()
 
 			if (isTodoListChanged) {
 				const md = todoListToMarkdown(normalizedTodos)

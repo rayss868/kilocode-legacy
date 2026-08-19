@@ -16,6 +16,7 @@ import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
 
 import { fetchInstructionsTool } from "../tools/FetchInstructionsTool"
+import { loadSkillTool } from "../tools/LoadSkillTool"
 import { listFilesTool } from "../tools/ListFilesTool"
 import { readFileTool } from "../tools/ReadFileTool"
 import { TOOL_PROTOCOL } from "@roo-code/types"
@@ -421,6 +422,8 @@ export async function presentAssistantMessage(cline: Task) {
 						return readFileTool.getReadFileToolDescription(block.name, block.params)
 					case "fetch_instructions":
 						return `[${block.name} for '${block.params.task}']`
+					case "load_skill":
+						return `[${block.name} for '${block.params.query}']`
 					case "write_to_file":
 						return `[${block.name} for '${block.params.path}']`
 					case "apply_diff":
@@ -1066,6 +1069,15 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				case "fetch_instructions":
 					await fetchInstructionsTool.handle(cline, block as ToolUse<"fetch_instructions">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+						removeClosingTag,
+						toolProtocol,
+					})
+					break
+				case "load_skill":
+					await loadSkillTool.handle(cline, block as ToolUse<"load_skill">, {
 						askApproval,
 						handleError,
 						pushToolResult,

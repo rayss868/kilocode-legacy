@@ -213,6 +213,9 @@
 	"instructions": {
 		"wantsToFetch": "Kilo Code wants to fetch detailed instructions to assist with the current task"
 	},
+	"skills": {
+		"wantsToLoad": "Kilo Code wants to load skill:"
+	},
 	"fileOperations": {
 		"wantsToRead": "Kilo Code wants to read this file",
 		"wantsToReadMultiple": "Kilo Code wants to read multiple files",

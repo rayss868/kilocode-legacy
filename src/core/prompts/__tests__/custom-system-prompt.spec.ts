@@ -217,4 +217,53 @@ describe("File-Based Custom System Prompt", () => {
 		expect(prompt).not.toContain("CAPABILITIES")
 		expect(prompt).not.toContain("MODES")
 	})
+
+	it("should include available skills in a file-based custom system prompt", async () => {
+		const fileCustomSystemPrompt = "Custom system prompt from file"
+		mockedFs.readFile.mockImplementation((filePath, options) => {
+			if (toPosix(filePath).includes(`.kilocode/system-prompt-${defaultModeSlug}`) && options === "utf-8") {
+				return Promise.resolve(fileCustomSystemPrompt)
+			}
+			return Promise.reject({ code: "ENOENT" })
+		})
+
+		const skillsManager = {
+			getSkillsForMode: vi.fn().mockReturnValue([
+				{
+					name: "human-like-writer",
+					description: "Writes natural prose",
+					path: "/skills/human-like-writer/SKILL.md",
+					source: "global" as const,
+				},
+			]),
+			waitUntilReady: vi.fn().mockResolvedValue(undefined),
+		}
+
+		const prompt = await SYSTEM_PROMPT(
+			mockContext,
+			"test/path",
+			false,
+			undefined,
+			undefined,
+			undefined,
+			defaultModeSlug,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			skillsManager as any,
+		)
+
+		expect(prompt).toContain("<available_skills>")
+		expect(prompt).toContain("<name>human-like-writer</name>")
+		expect(prompt).toContain("list or describe the available skills")
+	})
 })

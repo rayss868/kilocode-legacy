@@ -8,10 +8,13 @@ import { getGlobalRooDirectory } from "../roo-config"
 import { directoryExists, fileExists } from "../roo-config"
 import { SkillMetadata, SkillContent } from "../../shared/skills"
 import { modes, getAllModes } from "../../shared/modes"
+import { resolveSkillApplicability as resolveSkillApplicabilityMatch, resolveSkillQuery as resolveSkillQueryMatch, RankedSkillMatch, SkillApplicabilityResult, SkillMatchResult } from "./skillResolver"
 import { ConfigChangeNotifier } from "../config/ConfigChangeNotifier" // kilocode_change
 
-// Re-export for convenience
-export type { SkillMetadata, SkillContent }
+export type SkillLoadResult =
+	| { status: "loaded"; content: SkillContent; alternatives: RankedSkillMatch[] }
+	| { status: "ambiguous"; matches: RankedSkillMatch[] }
+	| { status: "not_found"; matches: RankedSkillMatch[] }
 
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
@@ -19,6 +22,7 @@ export class SkillsManager {
 	private disposables: vscode.Disposable[] = []
 	private isDisposed = false
 	private configChangeNotifier: ConfigChangeNotifier // kilocode_change
+	private initializationPromise?: Promise<void> // kilocode_change
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
@@ -26,8 +30,18 @@ export class SkillsManager {
 	}
 
 	async initialize(): Promise<void> {
-		await this.discoverSkills()
-		await this.setupFileWatchers()
+		if (!this.initializationPromise) {
+			this.initializationPromise = (async () => {
+				await this.discoverSkills()
+				await this.setupFileWatchers()
+			})()
+		}
+
+		return this.initializationPromise
+	}
+
+	async waitUntilReady(): Promise<void> {
+		await this.initialize()
 	}
 
 	/**
@@ -254,6 +268,41 @@ export class SkillsManager {
 		return {
 			...skill,
 			instructions: body.trim(),
+		}
+	}
+
+	async resolveSkillApplicability(request: string, currentMode: string): Promise<SkillApplicabilityResult> {
+		await this.waitUntilReady()
+		return resolveSkillApplicabilityMatch(request, this.getSkillsForMode(currentMode))
+	}
+
+	async loadSkillContentByName(name: string, currentMode: string): Promise<SkillContent | null> {
+		await this.waitUntilReady()
+		return this.getSkillContent(name, currentMode)
+	}
+
+	async resolveSkillQuery(query: string, currentMode: string): Promise<SkillMatchResult> {
+		await this.waitUntilReady()
+		return resolveSkillQueryMatch(query, this.getSkillsForMode(currentMode))
+	}
+
+	async loadSkillByQuery(query: string, currentMode: string): Promise<SkillLoadResult> {
+		if (!query.trim()) {
+			throw new Error("Skill query must not be empty")
+		}
+
+		const result = await this.resolveSkillQuery(query, currentMode)
+		if (result.status !== "matched") return result
+
+		const content = await this.getSkillContent(result.match.skill.name, currentMode)
+		if (!content) {
+			throw new Error(`Skill file is no longer available: ${result.match.skill.path}`)
+		}
+
+		return {
+			status: "loaded",
+			content,
+			alternatives: result.alternatives,
 		}
 	}
 
