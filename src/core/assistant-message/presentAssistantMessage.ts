@@ -1367,15 +1367,21 @@ export async function presentAssistantMessage(cline: Task) {
  * @param task The Task instance to checkpoint save and mark.
  * @returns
  */
-async function checkpointSaveAndMark(task: Task) {
+export async function checkpointSaveAndMark(task: Task) {
 	if (task.currentStreamingDidCheckpoint) {
 		return
 	}
+
+	task.currentStreamingDidCheckpoint = true
 	try {
-		// kilocode_change: order changed to prevent second execution while still awaiting the save
-		task.currentStreamingDidCheckpoint = true
-		await task.checkpointSave(true)
+		// kilocode_change: clear the per-stream guard when saving did not produce a checkpoint
+		const result = await task.checkpointSave(true)
+		if (!result) {
+			task.currentStreamingDidCheckpoint = false
+		}
 	} catch (error) {
-		console.error(`[Task#presentAssistantMessage] Error saving checkpoint: ${error.message}`, error)
+		task.currentStreamingDidCheckpoint = false
+		const message = error instanceof Error ? error.message : String(error)
+		console.error(`[Task#presentAssistantMessage] Error saving checkpoint: ${message}`, error)
 	}
 }

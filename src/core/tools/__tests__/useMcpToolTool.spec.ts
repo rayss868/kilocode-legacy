@@ -1,6 +1,7 @@
 // npx vitest core/tools/__tests__/useMcpToolTool.spec.ts
 
 import { useMcpToolTool } from "../UseMcpToolTool"
+import { accessMcpResourceTool } from "../accessMcpResourceTool"
 import { Task } from "../../task/Task"
 import { ToolUse } from "../../../shared/tools"
 
@@ -254,6 +255,87 @@ describe("useMcpToolTool", () => {
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_request_started")
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_response", "Tool executed successfully")
 			expect(mockPushToolResult).toHaveBeenCalledWith("Tool result: Tool executed successfully")
+		})
+
+		it("should show the beginning and end of oversized MCP tool output with a warning", async () => {
+			const block: ToolUse = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test_server",
+					tool_name: "test_tool",
+					arguments: "{}",
+				},
+				partial: false,
+			}
+			const outputStart = "MCP_OUTPUT_START"
+			const outputEnd = "MCP_OUTPUT_END"
+			const output = `${outputStart}${"x".repeat(200000)}${outputEnd}`
+
+			mockAskApproval.mockResolvedValue(true)
+			mockTask.api!.countTokens = vi.fn().mockImplementation((messages) => messages[0].text.length)
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: vi.fn().mockReturnValue([
+						{ name: "test_server", tools: [{ name: "test_tool", description: "Test Tool" }] },
+					]),
+					callTool: vi.fn().mockResolvedValue({
+						content: [{ type: "text", text: output }],
+						isError: false,
+					}),
+				}),
+				postMessageToWebview: vi.fn(),
+				getState: vi.fn().mockResolvedValue({ allowVeryLargeReads: false }),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block as any, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				removeClosingTag: mockRemoveClosingTag,
+				toolProtocol: "xml",
+			})
+
+			const responseCall = (mockTask.say as ReturnType<typeof vi.fn>).mock.calls.find(([type]) => type === "mcp_server_response")
+			expect(responseCall?.[1]).toContain(outputStart)
+			expect(responseCall?.[1]).toContain(outputEnd)
+			expect(responseCall?.[1]).toContain("truncated")
+			expect(responseCall?.[1]).not.toBe(output)
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining(outputStart))
+		})
+
+		it("should show the beginning and end of oversized MCP resource output with a warning", async () => {
+			const outputStart = "MCP_RESOURCE_START"
+			const outputEnd = "MCP_RESOURCE_END"
+			const output = `${outputStart}${"x".repeat(200000)}${outputEnd}`
+			mockAskApproval.mockResolvedValue(true)
+			mockTask.api!.countTokens = vi.fn().mockImplementation((messages) => messages[0].text.length)
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					readResource: vi.fn().mockResolvedValue({ contents: [{ text: output }] }),
+				}),
+				getState: vi.fn().mockResolvedValue({ allowVeryLargeReads: false }),
+			})
+
+			await accessMcpResourceTool.handle(mockTask as Task, {
+				type: "tool_use",
+				name: "access_mcp_resource",
+				params: { server_name: "test_server", uri: "test://resource" },
+				partial: false,
+			} as any, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				removeClosingTag: mockRemoveClosingTag,
+				toolProtocol: "xml",
+			})
+
+			const responseCall = (mockTask.say as ReturnType<typeof vi.fn>).mock.calls.find(([type]) => type === "mcp_server_response")
+			expect(responseCall?.[1]).toContain(outputStart)
+			expect(responseCall?.[1]).toContain(outputEnd)
+			expect(responseCall?.[1]).toContain("truncated")
+			expect(responseCall?.[1]).not.toBe(output)
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining(outputStart))
 		})
 
 		it("should handle user rejection", async () => {

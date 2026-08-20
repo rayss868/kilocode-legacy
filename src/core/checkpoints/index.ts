@@ -125,6 +125,11 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		const service = RepoPerTaskCheckpointService.create(options)
 		task.checkpointServiceInitializing = true
 		await checkGitInstallation(task, service, log, provider)
+		// kilocode_change: do not attach a service that failed shadow Git initialization
+		if (!task.enableCheckpoints || !service.isInitialized) {
+			task.checkpointServiceInitializing = false
+			return undefined
+		}
 		task.checkpointService = service
 		if (task.enableCheckpoints) {
 			sendCheckpointInitWarn(task)
@@ -289,17 +294,19 @@ export async function checkpointRestore(
 				includeTargetMessage: operation === "edit",
 			})
 
-			// Report the deleted API request metrics
-			await task.say(
-				"api_req_deleted",
-				JSON.stringify({
-					tokensIn: totalTokensIn,
-					tokensOut: totalTokensOut,
-					cacheWrites: totalCacheWrites,
-					cacheReads: totalCacheReads,
-					cost: totalCost,
-				} satisfies ClineApiReqInfo),
-			)
+			// Report the deleted API request metrics while the task can still accept messages.
+			if (!task.abort) {
+				await task.say(
+					"api_req_deleted",
+					JSON.stringify({
+						tokensIn: totalTokensIn,
+						tokensOut: totalTokensOut,
+						cacheWrites: totalCacheWrites,
+						cacheReads: totalCacheReads,
+						cost: totalCost,
+					} satisfies ClineApiReqInfo),
+				)
+			}
 		}
 
 		// The task is already cancelled by the provider beforehand, but we

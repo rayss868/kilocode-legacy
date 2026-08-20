@@ -260,6 +260,21 @@ describe("Checkpoint functionality", () => {
 			expect(mockProvider.cancelTask).toHaveBeenCalled()
 		})
 
+		it("should continue restoring when the task was stopped before editing", async () => {
+			mockTask.abort = true
+			mockTask.say.mockRejectedValue(new Error("Task aborted"))
+
+			await checkpointRestore(mockTask, {
+				ts: 2,
+				commitHash: "abc123",
+				mode: "restore",
+				operation: "edit",
+			})
+
+			expect(mockProvider.cancelTask).toHaveBeenCalled()
+			expect(mockTask.enableCheckpoints).toBe(true)
+		})
+
 		it("should handle preview mode without modifying messages", async () => {
 			await checkpointRestore(mockTask, {
 				ts: 2,
@@ -423,6 +438,18 @@ describe("Checkpoint functionality", () => {
 			mockTask.checkpointServiceInitializing = true
 			const service = await getCheckpointService(mockTask)
 			expect(service).toBeUndefined()
+		})
+
+		it("should not attach the service when shadow Git initialization fails", async () => {
+			mockTask.checkpointService = undefined
+			mockTask.checkpointServiceInitializing = false
+			mockCheckpointService.initShadowGit.mockRejectedValue(new Error("Shadow Git initialization failed"))
+
+			const service = await getCheckpointService(mockTask)
+
+			expect(service).toBeUndefined()
+			expect(mockTask.checkpointService).toBeUndefined()
+			expect(mockTask.enableCheckpoints).toBe(false)
 		})
 
 		it("should create new service if none exists", async () => {

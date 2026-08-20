@@ -6,6 +6,7 @@ import { t } from "../../i18n"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { summarizeSuccessfulMcpOutputWhenTooLong } from "./kilocode"
 
 interface UseMcpToolParams {
 	server_name: string
@@ -349,13 +350,17 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			const outputText = this.processToolContent(toolResult)
 
 			if (outputText) {
+				const responseText = toolResult.isError
+					? `Error:\n${outputText}`
+					: await summarizeSuccessfulMcpOutputWhenTooLong(task, outputText)
+
 				await this.sendExecutionStatus(task, {
 					executionId,
 					status: "output",
-					response: outputText,
+					response: responseText,
 				})
 
-				toolResultPretty = (toolResult.isError ? "Error:\n" : "") + outputText
+				toolResultPretty = responseText
 			}
 
 			// Send completion status

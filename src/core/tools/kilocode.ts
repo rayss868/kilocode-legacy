@@ -23,11 +23,32 @@ export async function summarizeSuccessfulMcpOutputWhenTooLong(task: Task, output
 	if (tokenEstimate < tokenLimit) {
 		return outputText
 	}
-	return (
-		`The MCP tool executed successfully, but the output is unavailable, ` +
-		`because it is too long (${tokenEstimate} estimated tokens, limit is ${tokenLimit} tokens). ` +
-		`If you need the output, find an alternative way to get it in manageable chunks.`
-	)
+
+	const warning =
+		`The MCP output was truncated because it was too long (${tokenEstimate} estimated tokens, limit is ${tokenLimit} tokens). ` +
+		`Showing the beginning and end of the output. Use chunks or filters to read the rest.`
+	const separator = `\n\n[WARNING]\n${warning}\n\n`
+
+	let low = 0
+	let high = Math.floor(outputText.length / 2)
+	let bestPreview = warning
+
+	while (low <= high) {
+		const sideLength = Math.floor((low + high) / 2)
+		const prefix = outputText.slice(0, sideLength)
+		const suffix = outputText.slice(-sideLength)
+		const preview = `${prefix}${separator}${suffix}`
+		const previewTokenEstimate = await getTokenEstimate(task, preview)
+
+		if (previewTokenEstimate < tokenLimit) {
+			bestPreview = preview
+			low = sideLength + 1
+		} else {
+			high = sideLength - 1
+		}
+	}
+
+	return bestPreview
 }
 
 export async function blockFileReadWhenTooLarge(task: Task, relPath: string, content: string) {

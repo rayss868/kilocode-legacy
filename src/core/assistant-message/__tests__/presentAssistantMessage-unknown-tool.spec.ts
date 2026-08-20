@@ -1,7 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { presentAssistantMessage } from "../presentAssistantMessage"
+import { presentAssistantMessage, checkpointSaveAndMark } from "../presentAssistantMessage"
 
 // Mock dependencies
 vi.mock("../../task/Task")
@@ -30,6 +30,8 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 			presentAssistantMessageHasPendingUpdates: false,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
+			currentStreamingDidCheckpoint: false,
+			checkpointSave: vi.fn().mockResolvedValue(undefined),
 			userMessageContent: [],
 			didCompleteReadingStream: false,
 			didRejectTool: false,
@@ -73,6 +75,32 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		})
 	})
 
+	it("should allow retry after a checkpoint save returns no result", async () => {
+		mockTask.checkpointSave.mockResolvedValue(undefined)
+
+		await checkpointSaveAndMark(mockTask)
+		await checkpointSaveAndMark(mockTask)
+
+		expect(mockTask.checkpointSave).toHaveBeenCalledTimes(2)
+	})
+
+	it("should allow retry after a checkpoint save throws", async () => {
+		mockTask.checkpointSave.mockRejectedValueOnce(new Error("save failed")).mockResolvedValue({ commit: "hash" })
+
+		await checkpointSaveAndMark(mockTask)
+		await checkpointSaveAndMark(mockTask)
+
+		expect(mockTask.checkpointSave).toHaveBeenCalledTimes(2)
+	})
+
+	it("should not retry after a checkpoint is saved", async () => {
+		mockTask.checkpointSave.mockResolvedValue({ commit: "hash" })
+
+		await checkpointSaveAndMark(mockTask)
+		await checkpointSaveAndMark(mockTask)
+
+		expect(mockTask.checkpointSave).toHaveBeenCalledTimes(1)
+	})
 	it("should return error for unknown tool in native protocol", async () => {
 		// Set up a tool_use block with an unknown tool name and an ID (native protocol)
 		const toolCallId = "tool_call_unknown_123"
